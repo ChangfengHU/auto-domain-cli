@@ -7,6 +7,7 @@ WORK_DIR="$(mktemp -d /tmp/auto-domain-skill-XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 TS="$(date +%Y%m%d%H%M%S)"
 RELEASE_PATH="auto-domain/release"
+PUBLISH_SKILL_INSTALL_URL="${PUBLISH_SKILL_INSTALL_URL:-https://skill.vyibc.com/install-publish-skill.sh}"
 
 cp -R "$ROOT_DIR/skills/$SKILL_NAME" "$WORK_DIR/$SKILL_NAME"
 
@@ -30,7 +31,30 @@ ZIP_URL="$(printf '%s' "$ZIP_JSON" | python3 -c 'import json,sys; print(json.loa
 ZIP_URL_TS="${ZIP_URL}?ts=${TS}"
 
 INSTALL_SCRIPT="$WORK_DIR/install-${SKILL_NAME}.sh"
-sed "s|__ZIP_URL__|$ZIP_URL_TS|g; s|__SKILL_NAME__|$SKILL_NAME|g" "$ROOT_DIR/templates/install-skill.sh" > "$INSTALL_SCRIPT"
+PUBLISH_TEMPLATE="$WORK_DIR/install-publish-skill.sh"
+curl -fsSL "$PUBLISH_SKILL_INSTALL_URL" -o "$PUBLISH_TEMPLATE"
+
+python3 - "$PUBLISH_TEMPLATE" "$INSTALL_SCRIPT" "$SKILL_NAME" "$ZIP_URL_TS" <<'PY'
+import pathlib
+import re
+import sys
+
+src = pathlib.Path(sys.argv[1])
+dst = pathlib.Path(sys.argv[2])
+skill_name = sys.argv[3]
+zip_url = sys.argv[4]
+text = src.read_text()
+text = re.sub(r'^SKILL_NAME="[^"]*"$', f'SKILL_NAME="{skill_name}"', text, flags=re.M)
+text = re.sub(r'^ZIP_URL="[^"]*"$', f'ZIP_URL="{zip_url}"', text, flags=re.M)
+text = re.sub(
+    r'^(# Auto-generated one-click install script for: ).*$',
+    rf'\1{skill_name}',
+    text,
+    flags=re.M,
+)
+dst.write_text(text)
+PY
+
 chmod +x "$INSTALL_SCRIPT"
 
 "$ROOT_DIR/scripts/upload-file.sh" --file "$INSTALL_SCRIPT" --name "install-${SKILL_NAME}.sh" >/dev/null
