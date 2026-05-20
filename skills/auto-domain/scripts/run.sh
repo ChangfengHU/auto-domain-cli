@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# auto-domain skill runner
+# auto-domain unified runner
 
 set -euo pipefail
 
@@ -7,10 +7,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CACHE_DIR="$HOME/.auto-domain"
 CONFIG_FILE="$CACHE_DIR/config"
-AGENT_DIR="$SKILL_DIR/agent"
-AGENT_JS="$AGENT_DIR/agent.js"
-AGENT_PKG="$AGENT_DIR/package.json"
 AUTO_DOMAIN_SERVER="${AUTO_DOMAIN_SERVER:-wss://tunnel-api.chxyka.ccwu.cc}"
+AGENT_URL="${AGENT_URL:-https://skill.vyibc.com/agent.js}"
+
+if [[ -f "$SKILL_DIR/agent/agent.js" ]]; then
+  AGENT_DIR="$SKILL_DIR/agent"
+  AGENT_JS="$AGENT_DIR/agent.js"
+  AGENT_PKG="$AGENT_DIR/package.json"
+  AGENT_MODE="installed-skill"
+else
+  AGENT_DIR="$CACHE_DIR"
+  AGENT_JS="$CACHE_DIR/agent.js"
+  AGENT_PKG="$CACHE_DIR/package.json"
+  AGENT_MODE="direct-cli"
+fi
 
 mkdir -p "$CACHE_DIR"
 
@@ -64,6 +74,17 @@ if [[ "$NODE_VER" -lt 18 ]]; then
   exit 1
 fi
 
+if [[ "$AGENT_MODE" == "direct-cli" && ! -f "$AGENT_JS" ]]; then
+  echo "Downloading auto-domain agent..."
+  curl -fsSL "$AGENT_URL" -o "$AGENT_JS"
+fi
+
+if [[ ! -f "$AGENT_PKG" ]]; then
+  cat > "$AGENT_PKG" <<'EOF'
+{"name":"auto-domain-agent","private":true,"dependencies":{"ws":"^8.18.0"}}
+EOF
+fi
+
 if [[ ! -d "$AGENT_DIR/node_modules/ws" ]]; then
   echo "Installing auto-domain agent dependencies..."
   (cd "$AGENT_DIR" && npm install --silent --prefer-offline)
@@ -73,5 +94,7 @@ ARGS="--port=$PORT"
 [[ -n "$TOKEN" ]] && ARGS="$ARGS --token=$TOKEN"
 [[ -n "$NAME" ]] && ARGS="$ARGS --name=$NAME"
 [[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS="$ARGS --server=$AUTO_DOMAIN_SERVER"
+
+echo "Connecting auto-domain..."
 
 exec node "$AGENT_JS" $ARGS
