@@ -12,11 +12,14 @@ PUBLISH_SKILL_INSTALL_URL="${PUBLISH_SKILL_INSTALL_URL:-https://skill.vyibc.com/
 cp -R "$ROOT_DIR/skills/$SKILL_NAME" "$WORK_DIR/$SKILL_NAME"
 
 ZIP_FILE="$WORK_DIR/${SKILL_NAME}-${TS}.zip"
-python3 - <<PY
-import os, zipfile
-root = ${WORK_DIR@Q}
-skill = ${SKILL_NAME@Q}
-zip_path = ${ZIP_FILE@Q}
+python3 - "$WORK_DIR" "$SKILL_NAME" "$ZIP_FILE" <<'PY'
+import os
+import sys
+import zipfile
+
+root = sys.argv[1]
+skill = sys.argv[2]
+zip_path = sys.argv[3]
 base = os.path.join(root, skill)
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
     for current, _, files in os.walk(base):
