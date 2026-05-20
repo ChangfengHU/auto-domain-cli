@@ -62,7 +62,8 @@ bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
 1. 从 GitHub `main` 拉取最新 `auto-domain-cli`
 2. 在临时目录里运行 `scripts/publish-skill.sh`
 3. 发布最新 skill zip
-4. 生成新的安装命令
+4. 刷新 `install-auto-domain.sh` 和 `auto-domain.sh`
+5. 生成新的最终使用命令
 
 也就是说，它不依赖你当前所在目录，只依赖 GitHub 远程代码已经是最新版本。
 
@@ -79,21 +80,24 @@ bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
 1. 打包最新 `skills/auto-domain/`
 2. 上传新的 skill zip
 3. 基于最新 `publish-skill` 安装器模板生成 `install-auto-domain.sh`
-4. 输出新的安装命令
+4. 直接把 `skills/auto-domain/scripts/run.sh` 上传成 `skill.vyibc.com/auto-domain.sh`
+5. 直接把 `skills/auto-domain/agent/agent.js` 上传成 `skill.vyibc.com/agent.js`
+6. 输出两条最终命令
 
-也就是说，它负责生产这条命令背后的内容：
+也就是说，它会同时刷新这两条命令背后的内容：
 
 ```bash
 bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
-```
-
-它**不负责** CLI 这条命令：
-
-```bash
 bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp
 ```
 
-CLI 入口来自 `scripts/auto-domain.sh`。
+仓库里的唯一核心执行逻辑是：
+
+```text
+skills/auto-domain/scripts/run.sh
+```
+
+`skill` 安装后执行的是这份脚本；CLI 对外入口 `skill.vyibc.com/auto-domain.sh` 也是发布时由这份脚本直接上传生成。
 
 ## 5. 维护者发布流程
 
@@ -114,11 +118,11 @@ bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
 脚本会输出：
 
 ```text
-ZIP_URL=...
-INSTALL_COMMAND=bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
+SKILL_INSTALL_COMMAND=bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
+CLI_COMMAND=bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp
 ```
 
-然后把输出的 `INSTALL_COMMAND` 发给使用者即可。
+然后把输出的两条命令发给使用者即可。
 
 这样做的原因：
 
@@ -152,7 +156,7 @@ agent/
 - `scripts/install-auto-domain.sh` 是固定的 skill 安装入口
 - `scripts/publish-auto-domain.sh` 是基于 GitHub 远程代码发布 skill 的一行命令入口
 - `scripts/publish-skill.sh` 是维护者发布 skill 用的脚本
-- `skills/auto-domain/` 是真正会被安装下去的 skill 内容
+- `skills/auto-domain/` 是真正会被安装下去的 skill 内容，也是 CLI 核心逻辑来源
 - `agent/` 是 CLI 模式使用的 agent 源码
 
 ## 7. 可选 token
