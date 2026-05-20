@@ -62,5 +62,5 @@ chmod +x "$INSTALL_SCRIPT"
 
 "$ROOT_DIR/scripts/upload-file.sh" --file "$INSTALL_SCRIPT" --name "install-${SKILL_NAME}.sh" >/dev/null
 
-echo "ZIP_URL=${ZIP_URL_TS}"
-echo "INSTALL_COMMAND=bash <(curl -fsSL https://skill.vyibc.com/install-${SKILL_NAME}.sh?ts=${TS})"
+echo "SKILL_INSTALL_COMMAND=bash <(curl -fsSL 'https://skill.vyibc.com/install-${SKILL_NAME}.sh?ts=${TS}')"
+echo "CLI_COMMAND=bash <(curl -fsSL https://skill.vyibc.com/${SKILL_NAME}.sh) --port=3000 --name=myapp"
