@@ -1,0 +1,7 @@
+{
+  "name": "auto-domain-skill-agent",
+  "private": true,
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

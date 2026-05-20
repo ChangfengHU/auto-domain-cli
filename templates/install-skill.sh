@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SKILL_NAME="auto-domain"
-ZIP_URL="https://skill.vyibc.com/auto-domain-skill.zip"
+SKILL_NAME="__SKILL_NAME__"
+ZIP_URL="__ZIP_URL__"
 TARGET="${1:-}"
 
 if [[ -z "$TARGET" ]]; then
