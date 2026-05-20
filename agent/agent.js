@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * auto-domain Agent
- * Usage: node agent.js --token=TOKEN [--port=3000] [--name=myapp] [--server=wss://tunnel-api.vyibc.com]
+ * Usage: node agent.js [--token=TOKEN] [--port=3000] [--name=myapp] [--server=wss://tunnel-api.vyibc.com]
  */
 
 const WebSocket = require('ws');
@@ -22,11 +22,6 @@ const TOKEN  = args.token  || args.t || '';
 const NAME   = args.name   || args.n || '';
 const SERVER = (args.server || 'wss://tunnel-api.chxyka.ccwu.cc').replace(/\/$/, '');
 
-if (!TOKEN) {
-  console.error('Usage: node agent.js --token=YOUR_TOKEN [--port=3000] [--name=myapp]');
-  process.exit(1);
-}
-
 // ── Connect ──────────────────────────────────────────────────────────────────
 
 let reconnectDelay = 3000;
@@ -34,7 +29,7 @@ let reconnectDelay = 3000;
 function buildWsUrl() {
   const base = SERVER.replace(/^http/, 'ws');
   const u = new URL(base);
-  u.searchParams.set('token', TOKEN);
+  if (TOKEN) u.searchParams.set('token', TOKEN);
   if (NAME) u.searchParams.set('name', NAME);
   return u.toString();
 }

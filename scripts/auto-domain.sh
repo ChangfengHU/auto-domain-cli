@@ -31,7 +31,7 @@ for arg in "$@"; do
       echo "选项:"
       echo "  --port=PORT    本地服务端口 (必填)"
       echo "  --name=NAME    自定义子域名 (可选，随机生成)"
-      echo "  --token=TOKEN  访问令牌 (可选，首次会提示输入)"
+      echo "  --token=TOKEN  访问令牌 (可选，会保存到本地配置)"
       echo "  --reset        清除本地缓存和配置重新初始化"
       echo ""
       echo "示例:"
@@ -55,20 +55,9 @@ if [[ -z "$TOKEN" ]]; then
   TOKEN="${AUTO_DOMAIN_TOKEN:-}"
 fi
 
-if [[ -z "$TOKEN" ]]; then
-  echo ""
-  echo "🔑 首次使用 auto-domain，请输入访问令牌。"
-  echo "   （没有令牌？联系管理员获取）"
-  echo ""
-  read -rp "Token: " TOKEN
-  if [[ -z "$TOKEN" ]]; then
-    echo "❌ 令牌不能为空" >&2
-    exit 1
-  fi
+if [[ -n "$TOKEN" ]]; then
   echo "AUTO_DOMAIN_TOKEN=$TOKEN" > "$CONFIG_FILE"
   chmod 600 "$CONFIG_FILE"
-  echo "✅ 令牌已保存到 $CONFIG_FILE"
-  echo ""
 fi
 
 # ── 端口 ──────────────────────────────────────────────────
@@ -101,7 +90,8 @@ if [[ ! -f "$AGENT_JS" ]]; then
 fi
 
 # ── 启动隧道 ──────────────────────────────────────────────
-ARGS="--token=$TOKEN --port=$PORT"
+ARGS="--port=$PORT"
+[[ -n "$TOKEN" ]] && ARGS="$ARGS --token=$TOKEN"
 [[ -n "$NAME" ]] && ARGS="$ARGS --name=$NAME"
 [[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS="$ARGS --server=$AUTO_DOMAIN_SERVER"
 
