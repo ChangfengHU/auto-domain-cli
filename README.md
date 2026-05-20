@@ -2,10 +2,7 @@
 
 `auto-domain` 用来把本地端口映射成一个可公开访问的 Cloudflare 域名。
 
-这个仓库现在有两类入口：
-
-1. 直接执行 CLI 脚本
-2. 安装真正的 skill，让 AI 通过 skill 调用脚本
+对外只需要记住两个命令：
 
 ## 1. 直接执行 CLI
 
@@ -34,7 +31,7 @@ bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=mya
 安装命令：
 
 ```bash
-bash <(curl -fsSL https://skill.vyibc.com/install-auto-domain.sh)
+bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=20260520175219')
 ```
 
 安装完成后，skill 里会自带：
@@ -52,21 +49,72 @@ skill 内部通过 `scripts/run.sh` 调用 auto-domain 服务。
 ~/.codex/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp
 ```
 
-## 3. 仓库结构
+## 3. `publish-skill.sh` 是做什么的
+
+这个脚本是仓库维护者使用的发布脚本：
+
+```bash
+./scripts/publish-skill.sh
+```
+
+它负责生成和刷新 skill 这一条对外入口的发布产物：
+
+1. 打包最新 `skills/auto-domain/`
+2. 上传新的 skill zip
+3. 基于最新 `publish-skill` 安装器模板生成 `install-auto-domain.sh`
+4. 输出新的安装命令
+
+也就是说，它负责生产这条命令背后的内容：
+
+```bash
+bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
+```
+
+它**不负责** CLI 这条命令：
+
+```bash
+bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp
+```
+
+CLI 入口来自 `scripts/auto-domain.sh`。
+
+## 4. 维护者发布流程
+
+当你修改了 `skills/auto-domain/` 后，发布流程是：
+
+```bash
+./scripts/publish-skill.sh
+```
+
+脚本会输出：
+
+```text
+ZIP_URL=...
+INSTALL_COMMAND=bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
+```
+
+然后把输出的 `INSTALL_COMMAND` 发给使用者即可。
+
+这样做的原因：
+
+- 安装脚本会自动跟随 `publish-skill` 的最新模板
+- URL 会带 `ts=时间戳`，避免缓存导致安装旧版本
+
+## 5. 仓库结构
 
 ```text
 README.md
 scripts/
   auto-domain.sh
   install-auto-domain.sh
+  publish-skill.sh
+  upload-file.sh
 skills/
   auto-domain/
     SKILL.md
     scripts/run.sh
     agent/agent.js
     agent/package.json
-templates/
-  install-skill.sh
 agent/
   agent.js
   package.json
@@ -76,10 +124,11 @@ agent/
 
 - `scripts/auto-domain.sh` 是直接给人执行的 CLI 入口
 - `scripts/install-auto-domain.sh` 是固定的 skill 安装入口
+- `scripts/publish-skill.sh` 是维护者发布 skill 用的脚本
 - `skills/auto-domain/` 是真正会被安装下去的 skill 内容
 - `agent/` 是 CLI 模式使用的 agent 源码
 
-## 4. 可选 token
+## 6. 可选 token
 
 `token` 不是必填项。它只用于后续扩展能力，例如：
 
@@ -93,7 +142,7 @@ agent/
 bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp --token=atd-xxxx
 ```
 
-## 5. DNS 说明
+## 7. DNS 说明
 
 公网域名需要正确的通配符 DNS 和 Worker 路由配置。
 
