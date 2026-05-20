@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SKILL_NAME="auto-domain"
-ZIP_URL="https://skill.vyibc.com/auto-domain-skill.zip"
+ZIP_URL="https://skill.vyibc.com/auto-domain/release/auto-domain-latest.zip"
 TARGET="${1:-}"
 
 if [[ -z "$TARGET" ]]; then
