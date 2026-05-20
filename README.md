@@ -2,7 +2,7 @@
 
 `auto-domain` 用来把本地端口映射成一个可公开访问的 Cloudflare 域名。
 
-对外只需要记住两个命令：
+对外主要有三个命令：
 
 ## 1. 直接执行 CLI
 
@@ -49,7 +49,24 @@ skill 内部通过 `scripts/run.sh` 调用 auto-domain 服务。
 ~/.codex/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp
 ```
 
-## 3. `publish-skill.sh` 是做什么的
+## 3. 远程发布最新 skill
+
+如果你已经把改动 push 到 GitHub 远程仓库，可以直接在任何目录执行：
+
+```bash
+bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
+```
+
+这个命令会：
+
+1. 从 GitHub `main` 拉取最新 `auto-domain-cli`
+2. 在临时目录里运行 `scripts/publish-skill.sh`
+3. 发布最新 skill zip
+4. 生成新的安装命令
+
+也就是说，它不依赖你当前所在目录，只依赖 GitHub 远程代码已经是最新版本。
+
+## 4. `publish-skill.sh` 是做什么的
 
 这个脚本是仓库维护者使用的发布脚本：
 
@@ -78,12 +95,20 @@ bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=mya
 
 CLI 入口来自 `scripts/auto-domain.sh`。
 
-## 4. 维护者发布流程
+## 5. 维护者发布流程
 
-当你修改了 `skills/auto-domain/` 后，发布流程是：
+有两种发布方式。
+
+如果你就在仓库目录里，本地发布：
 
 ```bash
 ./scripts/publish-skill.sh
+```
+
+如果你已经 push 到 GitHub，希望直接按远程 `main` 发布：
+
+```bash
+bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
 ```
 
 脚本会输出：
@@ -100,13 +125,14 @@ INSTALL_COMMAND=bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.s
 - 安装脚本会自动跟随 `publish-skill` 的最新模板
 - URL 会带 `ts=时间戳`，避免缓存导致安装旧版本
 
-## 5. 仓库结构
+## 6. 仓库结构
 
 ```text
 README.md
 scripts/
   auto-domain.sh
   install-auto-domain.sh
+  publish-auto-domain.sh
   publish-skill.sh
   upload-file.sh
 skills/
@@ -124,11 +150,12 @@ agent/
 
 - `scripts/auto-domain.sh` 是直接给人执行的 CLI 入口
 - `scripts/install-auto-domain.sh` 是固定的 skill 安装入口
+- `scripts/publish-auto-domain.sh` 是基于 GitHub 远程代码发布 skill 的一行命令入口
 - `scripts/publish-skill.sh` 是维护者发布 skill 用的脚本
 - `skills/auto-domain/` 是真正会被安装下去的 skill 内容
 - `agent/` 是 CLI 模式使用的 agent 源码
 
-## 6. 可选 token
+## 7. 可选 token
 
 `token` 不是必填项。它只用于后续扩展能力，例如：
 
@@ -142,7 +169,7 @@ agent/
 bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp --token=atd-xxxx
 ```
 
-## 7. DNS 说明
+## 8. DNS 说明
 
 公网域名需要正确的通配符 DNS 和 Worker 路由配置。
 
