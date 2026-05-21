@@ -1,6 +1,6 @@
 ---
 name: auto-domain
-description: "为本地端口分配一个可公开访问的 Cloudflare 域名；支持匿名临时隧道、可选 token，以及同名冲突自动加随机后缀。"
+description: "当用户说"给我的服务分配公网域名"、"内网穿透"、"暴露本地服务"、"expose localhost"、 "给端口分配域名"、"公网访问本地"、"auto-domain"、"隧道"、"tunnel 端口"、 "把本地服务暴露出去"、"我需要一个公网地址" 时自动触发。 一键为本地任意端口的服务分配 *.chxyka.ccwu.cc 公网域名，零配置，无需服务器。"
 ---
 
 # Auto Domain
@@ -9,51 +9,69 @@ description: "为本地端口分配一个可公开访问的 Cloudflare 域名；
 
 Use this skill when the user wants to expose a local port to the public internet through the auto-domain service.
 
-The fixed install command is:
-
-```bash
-bash <(curl -fsSL https://skill.vyibc.com/install-auto-domain.sh)
-```
-
-## Installed Location
-
-The skill is installed as:
-
-```text
-~/.codex/skills/auto-domain
-~/.claude/skills/auto-domain
-~/.cursor/skills/auto-domain
-```
-
-depending on the selected install target.
-
 ## Execution
 
-Run the helper script inside the installed skill directory:
+Run the helper script in **daemon mode** so it exits after printing the public URL:
 
 ```bash
-~/.codex/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp
+~/.claude/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp --daemon
 ```
 
-If the user works in another client, replace the root path accordingly.
+> **Important:** Always use `--daemon`. Without it the script blocks forever and Claude never receives the URL.
+
+To stop the background agent:
+
+```bash
+~/.claude/skills/auto-domain/scripts/run.sh --stop
+```
+
+## Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `--port`  | Yes | Local port to expose |
+| `--name`  | No  | Subdomain name (e.g. `myapp` → `myapp.chxyka.ccwu.cc`) |
+| `--token` | No  | Auth token if issued |
+| `--daemon`| Yes | Run in background, print URL and exit |
+| `--stop`  | No  | Stop the running background agent |
 
 ## Behavior
 
-- No token is required for a temporary tunnel.
-- If `--name=myapp` is already taken, the service automatically falls back to `myapp-xxxx`.
-- If the user has an issued token, append `--token=atd-...`.
-- Node.js 18 or newer is required on the local machine.
+- Starts agent in background, waits up to 20s for tunnel to come online.
+- Prints public URL on success, then exits — Claude can read and show the URL.
+- If `--name` is already taken: reports error immediately (does not time out).
+- If token is invalid: reports error immediately.
+- Re-running the same command while tunnel is alive prints the existing URL without restarting.
 
 ## Examples
 
-Anonymous tunnel:
+Expose port 3000:
 
 ```bash
-~/.codex/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp
+~/.claude/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp --daemon
 ```
 
 With token:
 
 ```bash
-~/.codex/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp --token=atd-xxxx
+~/.claude/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp --token=myproxy-token-2026 --daemon
+```
+
+Stop the tunnel:
+
+```bash
+~/.claude/skills/auto-domain/scripts/run.sh --stop
+```
+
+## Expected Output
+
+```
+Agent started in background (PID: 12345)...
+Waiting for tunnel to come online...
+
+Tunnel is live!
+   Public URL : https://myapp.chxyka.ccwu.cc
+   Forwarding : https://myapp.chxyka.ccwu.cc -> http://localhost:3000
+   Logs       : tail -f ~/.auto-domain/agent.log
+   Stop       : bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --stop
 ```
