@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * auto-domain Agent
- * Usage: node agent.js [--token=TOKEN] [--port=3000] [--name=myapp] [--server=wss://tunnel-api.vyibc.com]
+ * Usage: node agent.js --token=TOKEN [--port=3000] [--name=myapp] [--server=wss://tunnel-api.chxyka.ccwu.cc]
  */
 
 const WebSocket = require('ws');
@@ -21,17 +21,40 @@ const PORT   = parseInt(args.port   || args.p || '3000', 10);
 const TOKEN  = args.token  || args.t || '';
 const NAME   = args.name   || args.n || '';
 const SERVER = (args.server || 'wss://tunnel-api.chxyka.ccwu.cc').replace(/\/$/, '');
+const PING_INTERVAL_MS = 30_000; // 每 30 秒心跳，续期 KV 路由
+
+if (!TOKEN) {
+  console.error('Usage: node agent.js --token=YOUR_TOKEN [--port=3000] [--name=myapp]');
+  process.exit(1);
+}
 
 // ── Connect ──────────────────────────────────────────────────────────────────
 
 let reconnectDelay = 3000;
+let pingTimer = null;
 
 function buildWsUrl() {
   const base = SERVER.replace(/^http/, 'ws');
   const u = new URL(base);
-  if (TOKEN) u.searchParams.set('token', TOKEN);
+  u.searchParams.set('token', TOKEN);
   if (NAME) u.searchParams.set('name', NAME);
   return u.toString();
+}
+
+function startPing(ws) {
+  stopPing();
+  pingTimer = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'ping' }));
+    }
+  }, PING_INTERVAL_MS);
+}
+
+function stopPing() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
 }
 
 function connect() {
@@ -53,6 +76,11 @@ function connect() {
       console.log('\n✅ Tunnel is live!');
       console.log(`   Public URL : ${msg.url}`);
       console.log(`   Forwarding : ${msg.url} → http://localhost:${PORT}\n`);
+      startPing(ws); // 连接成功后启动心跳
+    }
+
+    if (msg.type === 'pong') {
+      // 心跳回包，连接正常
     }
 
     if (msg.type === 'request') {
@@ -61,6 +89,7 @@ function connect() {
   });
 
   ws.on('close', (code) => {
+    stopPing();
     console.log(`[auto-domain] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
     setTimeout(connect, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 30000);
@@ -80,7 +109,6 @@ async function handleRequest(ws, msg) {
     const hasBody = msg.body && !['GET', 'HEAD'].includes(msg.method.toUpperCase());
     const body = hasBody ? Buffer.from(msg.body, 'base64') : undefined;
 
-    // Filter out headers that shouldn't be forwarded to localhost
     const headers = { ...msg.headers };
     delete headers['host'];
     headers['host'] = `localhost:${PORT}`;
@@ -89,7 +117,7 @@ async function handleRequest(ws, msg) {
       method: msg.method,
       headers,
       body,
-      redirect: 'manual', // don't follow redirects, pass them back
+      redirect: 'manual',
     });
 
     const respBuffer = Buffer.from(await resp.arrayBuffer());
