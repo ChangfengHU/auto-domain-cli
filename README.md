@@ -1,184 +1,113 @@
 # auto-domain
 
-`auto-domain` 用来把本地端口映射成一个可公开访问的 Cloudflare 域名。
+把本地端口映射成可公开访问的 Cloudflare 域名，基于 WebSocket 反向隧道，无需服务器。
 
-对外主要有三个命令：
-
-## 1. 直接执行 CLI
-
-不需要安装 skill，直接运行：
+## 快速开始
 
 ```bash
-bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp
+bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) \
+  --port=3000 --name=myapp --token=YOUR_TOKEN --daemon
 ```
 
-说明：
+成功后输出：
 
-- 默认不需要 token，直接可以建立临时隧道。
-- 如果你传了 `--token=atd-...`，脚本会保存到 `~/.auto-domain/config`，后续自动复用。
-- 脚本会自动下载 agent、安装依赖并建立连接。
-- 本机只需要 `Node.js >= 18`。
-- 如果 `--name=myapp` 已被占用，系统会自动改成 `myapp-a7k3` 这类带随机后缀的可用域名。
+```
+Tunnel is live!
+   Public URL : https://myapp.chxyka.ccwu.cc
+   Forwarding : https://myapp.chxyka.ccwu.cc -> http://localhost:3000
+   Logs       : tail -f ~/.auto-domain/agent.log
+   Stop       : bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --stop
+```
 
-## 2. 安装 skill
+## 参数说明
 
-这个命令会把 `auto-domain` 作为一个真正的 skill 安装到目标目录，例如：
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--port` | 是 | 本地端口 |
+| `--name` | 否 | 子域名（如 `myapp` → `myapp.chxyka.ccwu.cc`） |
+| `--token` | 是 | 认证 token（向管理员申请） |
+| `--daemon` | 是 | 后台运行，打印公网 URL 后退出，Claude 可读取结果 |
+| `--stop` | 否 | 停止后台 agent |
+| `--reset` | 否 | 清除本地缓存重新初始化 |
 
-- `~/.codex/skills/auto-domain`
-- `~/.claude/skills/auto-domain`
-- `~/.cursor/skills/auto-domain`
+> **⚠️ 必须使用 `--daemon`**：不加此参数脚本会阻塞，Claude 永远收不到 URL 反馈。
 
-安装命令：
+## 停止隧道
 
 ```bash
-bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=20260520175219')
+bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --stop
 ```
 
-安装完成后，skill 里会自带：
+## 错误处理
 
-- `SKILL.md`
-- `scripts/run.sh`
-- `agent/agent.js`
-- `agent/package.json`
+| 错误 | 原因 | 解决 |
+|------|------|------|
+| `invalid token` | token 不存在或已失效 | 联系管理员重新申请 |
+| `subdomain already in use` | 该子域名正被其他隧道占用 | 换一个 `--name` |
+| Timed out | 连接超时 | 检查 `tail -f ~/.auto-domain/agent.log` |
 
-skill 内部通过 `scripts/run.sh` 调用 auto-domain 服务。
-
-例如在 Codex 环境里可以执行：
+## 安装为 Claude Code Skill
 
 ```bash
-~/.codex/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp
+bash <(curl -fsSL https://skill.vyibc.com/install-auto-domain.sh)
 ```
 
-## 3. 远程发布最新 skill
+安装后 Claude 会在用户说"暴露本地服务"、"内网穿透"、"给端口分配公网域名"等时自动触发。
 
-如果你已经把改动 push 到 GitHub 远程仓库，可以直接在任何目录执行：
+安装完成后执行：
 
 ```bash
-bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
+~/.claude/skills/auto-domain/scripts/run.sh --port=3000 --name=myapp --token=YOUR_TOKEN --daemon
 ```
 
-这个命令会：
-
-1. 从 GitHub `main` 拉取最新 `auto-domain-cli`
-2. 在临时目录里运行 `scripts/publish-skill.sh`
-3. 发布最新 skill zip
-4. 刷新 `install-auto-domain.sh` 和 `auto-domain.sh`
-5. 生成新的最终使用命令
-
-也就是说，它不依赖你当前所在目录，只依赖 GitHub 远程代码已经是最新版本。
-
-## 4. `publish-skill.sh` 是做什么的
-
-这个脚本是仓库维护者使用的发布脚本：
-
-```bash
-./scripts/publish-skill.sh
-```
-
-它负责生成和刷新 skill 这一条对外入口的发布产物：
-
-1. 打包最新 `skills/auto-domain/`
-2. 上传新的 skill zip
-3. 基于最新 `publish-skill` 安装器模板生成 `install-auto-domain.sh`
-4. 直接把 `skills/auto-domain/scripts/run.sh` 上传成 `skill.vyibc.com/auto-domain.sh`
-5. 直接把 `skills/auto-domain/agent/agent.js` 上传成 `skill.vyibc.com/agent.js`
-6. 输出两条最终命令
-
-也就是说，它会同时刷新这两条命令背后的内容：
-
-```bash
-bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
-bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp
-```
-
-仓库里的唯一核心执行逻辑是：
-
-```text
-skills/auto-domain/scripts/run.sh
-```
-
-`skill` 安装后执行的是这份脚本；CLI 对外入口 `skill.vyibc.com/auto-domain.sh` 也是发布时由这份脚本直接上传生成。
-
-## 5. 维护者发布流程
-
-有两种发布方式。
-
-如果你就在仓库目录里，本地发布：
-
-```bash
-./scripts/publish-skill.sh
-```
-
-如果你已经 push 到 GitHub，希望直接按远程 `main` 发布：
-
-```bash
-bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
-```
-
-脚本会输出：
-
-```text
-SKILL_INSTALL_COMMAND=bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
-CLI_COMMAND=bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp
-```
-
-然后把输出的两条命令发给使用者即可。
-
-这样做的原因：
-
-- 安装脚本会自动跟随 `publish-skill` 的最新模板
-- URL 会带 `ts=时间戳`，避免缓存导致安装旧版本
-
-## 6. 仓库结构
+## 仓库结构
 
 ```text
 README.md
+agent/
+  agent.js          # Agent 本体（WebSocket 客户端 + 心跳）
+  package.json
 scripts/
-  auto-domain.sh
+  auto-domain.sh        # CLI 直接执行入口（同步到 skill.vyibc.com）
   install-auto-domain.sh
   publish-auto-domain.sh
-  publish-skill.sh
+  publish-skill.sh      # 维护者发布脚本
   upload-file.sh
 skills/
   auto-domain/
-    SKILL.md
-    scripts/run.sh
-    agent/agent.js
+    SKILL.md            # Claude Code skill 定义
+    scripts/run.sh      # skill 执行脚本（与 auto-domain.sh 同步）
+    agent/agent.js      # skill 内置 agent
     agent/package.json
-agent/
-  agent.js
-  package.json
 ```
 
-说明：
+## 维护者发布流程
 
-- `scripts/auto-domain.sh` 是直接给人执行的 CLI 入口
-- `scripts/install-auto-domain.sh` 是固定的 skill 安装入口
-- `scripts/publish-auto-domain.sh` 是基于 GitHub 远程代码发布 skill 的一行命令入口
-- `scripts/publish-skill.sh` 是维护者发布 skill 用的脚本
-- `skills/auto-domain/` 是真正会被安装下去的 skill 内容，也是 CLI 核心逻辑来源
-- `agent/` 是 CLI 模式使用的 agent 源码
-
-## 7. 可选 token
-
-`token` 不是必填项。它只用于后续扩展能力，例如：
-
-- 更高配额
-- 固定保留域名
-- 隧道管理能力
-
-示例：
+修改客户端文件后，在 `cloudflare-youtube-pipeline/auto-domain-tunnel/` 目录执行：
 
 ```bash
-bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=3000 --name=myapp --token=atd-xxxx
+bash sync-client.sh \
+  --token=GITHUB_PAT \
+  --cf-key=CF_API_KEY \
+  --cf-email=CF_EMAIL
 ```
 
-## 8. DNS 说明
+同步范围：
+- `agent.js` → `auto-domain-cli/agent/agent.js` + R2
+- `run.sh` → `auto-domain-cli/skills/auto-domain/scripts/run.sh` + R2
+- `SKILL.md` → `auto-domain-cli/skills/auto-domain/SKILL.md`
 
-公网域名需要正确的通配符 DNS 和 Worker 路由配置。
+或直接使用仓库内发布脚本：
 
-当前这套服务主要依赖：
+```bash
+bash <(curl -fsSL https://skill.vyibc.com/publish-auto-domain.sh)
+```
 
-- `tunnel-api.chxyka.ccwu.cc`
-- `*.chxyka.ccwu.cc`
-- `*.vyibc.com`
+## 服务端
+
+Worker 代码维护在：https://github.com/ChangfengHU/cloudflare-youtube-pipeline/tree/main/auto-domain-tunnel
+
+## DNS 说明
+
+- Agent 连接：`wss://tunnel-api.chxyka.ccwu.cc`
+- 公网访问：`*.chxyka.ccwu.cc`
