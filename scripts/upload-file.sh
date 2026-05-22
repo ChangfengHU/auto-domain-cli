@@ -6,7 +6,7 @@ OBJECT_NAME=""
 OBJECT_PATH=""
 DOMAIN="${UPLOAD_R2_DOMAIN:-https://skill.vyibc.com}"
 API_URL="${UPLOAD_R2_URL:-https://upload-r2.vyibc.com}"
-API_TOKEN="${UPLOAD_R2_TOKEN:-123456}"
+API_TOKEN="${UPLOAD_R2_TOKEN:-yt-research-token-2026}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
