@@ -32,6 +32,8 @@ TOKEN=""
 RESET=0
 DAEMON=0
 STOP=0
+REPLACE=0
+AUTO_NAME=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -41,8 +43,10 @@ for arg in "$@"; do
     --reset) RESET=1 ;;
     --daemon|-d) DAEMON=1 ;;
     --stop) STOP=1 ;;
+    --replace) REPLACE=1 ;;
+    --auto-name) AUTO_NAME=1 ;;
     -h|--help)
-      echo "Usage: $0 --port=3000 [--name=myapp] [--token=xxx] [--daemon] [--stop] [--reset]"
+      echo "Usage: $0 --port=3000 [--name=myapp] [--token=xxx] [--daemon] [--stop] [--reset] [--replace] [--auto-name]"
       exit 0
       ;;
   esac
@@ -109,6 +113,8 @@ ARGS="--port=$PORT"
 [[ -n "$TOKEN" ]] && ARGS="$ARGS --token=$TOKEN"
 [[ -n "$NAME" ]] && ARGS="$ARGS --name=$NAME"
 [[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS="$ARGS --server=$AUTO_DOMAIN_SERVER"
+[[ "$REPLACE" == "1" ]] && ARGS="$ARGS --replace"
+[[ "$AUTO_NAME" == "1" ]] && ARGS="$ARGS --auto-name"
 
 if [[ "$DAEMON" == "1" ]]; then
   # ── 幂等检查：同名 tunnel 已在运行，直接返回 URL ──────────────────────────
