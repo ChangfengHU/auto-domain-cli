@@ -65,4 +65,4 @@ chmod +x "$INSTALL_SCRIPT"
 "$ROOT_DIR/scripts/upload-file.sh" --file "$ROOT_DIR/skills/${SKILL_NAME}/agent/agent.js" --name "agent.js" >/dev/null
 
 echo "SKILL_INSTALL_COMMAND=bash <(curl -fsSL 'https://skill.vyibc.com/install-${SKILL_NAME}.sh?ts=${TS}')"
-echo "CLI_COMMAND=bash <(curl -fsSL https://skill.vyibc.com/${SKILL_NAME}.sh) --port=3000 --name=myapp"
+echo "CLI_COMMAND=bash <(curl -fsSL \"https://skill.vyibc.com/${SKILL_NAME}.sh?v=\$(date +%s)\") --port=3000 --name=myapp"

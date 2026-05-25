@@ -93,9 +93,8 @@ if [[ "$NODE_VER" -lt 18 ]]; then
   echo "Node.js >= 18 is required" >&2; exit 1
 fi
 
-if [[ "$AGENT_MODE" == "direct-cli" && ! -f "$AGENT_JS" ]]; then
-  echo "Downloading auto-domain agent..."
-  curl -fsSL "$AGENT_URL" -o "$AGENT_JS"
+if [[ "$AGENT_MODE" == "direct-cli" ]]; then
+  curl -fsSL "${AGENT_URL}?v=$(date +%s)" -o "$AGENT_JS"
 fi
 
 if [[ ! -f "$AGENT_PKG" ]]; then
