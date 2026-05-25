@@ -23,6 +23,7 @@ const PORT      = parseInt(args.port || args.p || '3000', 10);
 const TOKEN     = args.token  || args.t || '';
 const NAME      = args.name   || args.n || '';
 const AUTO_NAME = args['auto-name'] === true || args['auto-name'] === '1' || args.auto === true || args.auto === '1';
+const REPLACE   = args['replace'] === true || args['replace'] === '1';
 const SERVER    = (args.server || 'wss://tunnel-api.chxyka.ccwu.cc').replace(/\/$/, '');
 const TG_TOKEN  = args['tg-token'] || process.env.TG_BOT_TOKEN  || '';
 const TG_CHAT   = args['tg-chat']  || process.env.TG_CHAT_ID    || '';
@@ -270,11 +271,23 @@ function connect() {
     console.error(`[auto-domain] Error: ${err.message}`);
 
     if (err.message.includes('409') || err.message.toLowerCase().includes('name already in use')) {
+      if (REPLACE && NAME) {
+        console.log(`[auto-domain] 409 detected — --replace mode: evicting old agent for '${NAME}'...`);
+        try {
+          const apiBase = SERVER.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
+          await fetch(`${apiBase}/admin/tunnels/${encodeURIComponent(NAME)}`, { method: 'DELETE' });
+        } catch (_) {}
+        await new Promise(r => setTimeout(r, 2000));
+        console.log('[auto-domain] Retrying connection...');
+        connect();
+        return;
+      }
       console.error(`\nError: subdomain '${NAME}' is already in use by another agent.`);
       console.error('   Use a different --name, or pass --auto-name to get a random suffix.');
+      console.error('   Or pass --replace to automatically evict the existing agent.');
       await sendTg(tgMsg('🚫', 'Name Conflict', {
         Name: NAME,
-        Action: 'Use a different --name, or pass --auto-name',
+        Action: 'Use --replace to evict, or choose a different --name',
       }));
       process.exit(2);
     }
