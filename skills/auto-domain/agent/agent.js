@@ -67,6 +67,7 @@ let reconnectCount = 0;
 let sleeping       = false;
 let localOk        = null;   // null=unknown, true=ok, false=down
 let failingSince   = null;   // timestamp: when did continuous failure start
+let replacing      = false;  // true while --replace eviction is in progress
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -250,6 +251,12 @@ function connect() {
       process.exit(0);
     }
 
+    // --replace eviction is already handling the reconnect; skip duplicate
+    if (replacing) {
+      replacing = false;
+      return;
+    }
+
     const downAt = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
     console.log(`[auto-domain] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
 
@@ -272,6 +279,7 @@ function connect() {
 
     if (err.message.includes('409') || err.message.toLowerCase().includes('name already in use')) {
       if (REPLACE && NAME) {
+        replacing = true;  // prevent close handler from scheduling a second reconnect
         console.log(`[auto-domain] 409 detected — --replace mode: evicting old agent for '${NAME}'...`);
         try {
           const apiBase = SERVER.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
