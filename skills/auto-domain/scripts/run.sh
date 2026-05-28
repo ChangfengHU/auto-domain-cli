@@ -47,6 +47,9 @@ for arg in "$@"; do
     --auto-name) AUTO_NAME=1 ;;
     -h|--help)
       echo "Usage: $0 --port=3000 [--name=myapp] [--token=xxx] [--daemon] [--stop] [--reset] [--replace] [--auto-name]"
+      echo "  --token       optional; kept for compatibility when a server token is issued"
+      echo "  --replace     replace existing tunnel for the same name (server-side)"
+      echo "  --auto-name   server appends a random 4-digit suffix to --name (guarantees uniqueness)"
       exit 0
       ;;
   esac
@@ -74,6 +77,8 @@ if [[ -z "$TOKEN" ]]; then
   TOKEN="${AUTO_DOMAIN_TOKEN:-}"
 fi
 
+# Token is optional for the current tunnel service. If one is provided, keep it
+# in local config so older deployments and future token-enabled servers still work.
 if [[ -n "$TOKEN" ]]; then
   echo "AUTO_DOMAIN_TOKEN=$TOKEN" > "$CONFIG_FILE"
   chmod 600 "$CONFIG_FILE"
@@ -111,9 +116,9 @@ fi
 ARGS="--port=$PORT"
 [[ -n "$TOKEN" ]] && ARGS="$ARGS --token=$TOKEN"
 [[ -n "$NAME" ]] && ARGS="$ARGS --name=$NAME"
-[[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS="$ARGS --server=$AUTO_DOMAIN_SERVER"
 [[ "$REPLACE" == "1" ]] && ARGS="$ARGS --replace"
 [[ "$AUTO_NAME" == "1" ]] && ARGS="$ARGS --auto-name"
+[[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS="$ARGS --server=$AUTO_DOMAIN_SERVER"
 
 if [[ "$DAEMON" == "1" ]]; then
   # ── 幂等检查：同名 tunnel 已在运行，直接返回 URL ──────────────────────────
@@ -155,13 +160,13 @@ if [[ "$DAEMON" == "1" ]]; then
       exit 0
     fi
     # 失败：域名被占用（409）
-    if grep -q "response: 409\|already in use" "$LOG_FILE" 2>/dev/null; then
+    if grep -q "response: 409\|already in use\|Name Conflict" "$LOG_FILE" 2>/dev/null; then
       echo ""
-      echo "Error: subdomain '$NAME' is already in use by another tunnel."
-      echo "   Use a different --name, or wait for the other tunnel to disconnect."
-      kill "$(cat "$PID_FILE")" 2>/dev/null
+      echo "Error: subdomain '$NAME' is already in use by another agent."
+      echo "   Use a different --name, or pass --auto-name to get a random suffix appended."
+      kill "$(cat "$PID_FILE")" 2>/dev/null || true
       rm -f "$PID_FILE"
-      exit 1
+      exit 2
     fi
     # 失败：token 无效（401）
     if grep -q "response: 401\|Unauthorized" "$LOG_FILE" 2>/dev/null; then

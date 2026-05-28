@@ -27,6 +27,7 @@ const REPLACE   = args['replace'] === true || args['replace'] === '1';
 const SERVER    = (args.server || 'wss://tunnel-api.chxyka.ccwu.cc').replace(/\/$/, '');
 const TG_TOKEN  = args['tg-token'] || process.env.TG_BOT_TOKEN  || '';
 const TG_CHAT   = args['tg-chat']  || process.env.TG_CHAT_ID    || '';
+const LOCAL_HOST = process.env.AUTO_DOMAIN_LOCAL_HOST || '127.0.0.1';
 
 const PING_INTERVAL_MS       = 300_000;              // 5 分钟心跳
 const LOCAL_CHECK_INTERVAL_MS = 30_000;              // 30s 本地健康检查
@@ -67,6 +68,7 @@ let reconnectCount = 0;
 let sleeping       = false;
 let localOk        = null;   // null=unknown, true=ok, false=down
 let failingSince   = null;   // timestamp: when did continuous failure start
+let replacing      = false;  // true while --replace eviction is in progress
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -95,7 +97,7 @@ async function checkLocalService() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
-    await fetch(`http://localhost:${PORT}/`, { signal: ctrl.signal });
+    await fetch(`http://${LOCAL_HOST}:${PORT}/`, { signal: ctrl.signal });
     clearTimeout(t);
     return true;
   } catch {
@@ -181,7 +183,7 @@ function connect() {
 
       console.log(`\n✅ Tunnel is live!`);
       console.log(`   Public URL : ${msg.url}`);
-      console.log(`   Forwarding : ${msg.url} → http://localhost:${PORT}\n`);
+      console.log(`   Forwarding : ${msg.url} → http://${LOCAL_HOST}:${PORT}\n`);
 
       startPing(ws);
       startLocalCheck(ws);
@@ -192,7 +194,7 @@ function connect() {
         {
           Subdomain: subdomain,
           URL: msg.url,
-          Forwarding: `→ http://localhost:${PORT}`,
+          Forwarding: `→ http://${LOCAL_HOST}:${PORT}`,
           ...(isReconnect ? { 'Reconnect #': String(reconnectCount - 1) } : {}),
         }
       ));
@@ -250,6 +252,12 @@ function connect() {
       process.exit(0);
     }
 
+    // --replace eviction is already handling the reconnect; skip duplicate
+    if (replacing) {
+      replacing = false;
+      return;
+    }
+
     const downAt = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
     console.log(`[auto-domain] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
 
@@ -272,6 +280,7 @@ function connect() {
 
     if (err.message.includes('409') || err.message.toLowerCase().includes('name already in use')) {
       if (REPLACE && NAME) {
+        replacing = true;  // prevent close handler from scheduling a second reconnect
         console.log(`[auto-domain] 409 detected — --replace mode: evicting old agent for '${NAME}'...`);
         try {
           const apiBase = SERVER.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
@@ -304,13 +313,13 @@ function connect() {
 // ── Handle proxy request ──────────────────────────────────────────────────────
 
 async function handleRequest(ws, msg) {
-  const localUrl = `http://localhost:${PORT}${msg.path}`;
+  const localUrl = `http://${LOCAL_HOST}:${PORT}${msg.path}`;
   try {
     const hasBody = msg.body && !['GET', 'HEAD'].includes(msg.method.toUpperCase());
     const body    = hasBody ? Buffer.from(msg.body, 'base64') : undefined;
     const headers = { ...msg.headers };
     delete headers['host'];
-    headers['host'] = `localhost:${PORT}`;
+    headers['host'] = `${LOCAL_HOST}:${PORT}`;
 
     const resp = await fetch(localUrl, { method: msg.method, headers, body, redirect: 'manual' });
     const respBuffer  = Buffer.from(await resp.arrayBuffer());
