@@ -134,19 +134,39 @@ function startLocalCheck(ws) {
   localCheckTimer = setInterval(() => doLocalCheck(ws), LOCAL_CHECK_INTERVAL_MS);
 }
 
-function buildWsUrl() {
+let cachedIPv4 = '';
+async function getPublicIPv4() {
+  if (cachedIPv4) return cachedIPv4;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2000);
+    const resp = await fetch('https://ipv4.icanhazip.com', { signal: ctrl.signal });
+    clearTimeout(t);
+    cachedIPv4 = (await resp.text()).trim();
+    return cachedIPv4;
+  } catch {
+    return '';
+  }
+}
+
+async function buildWsUrl() {
   const base = SERVER.replace(/^http/, 'ws');
   const u    = new URL(base);
   if (TOKEN) u.searchParams.set('token', TOKEN);
   u.searchParams.set('port', String(PORT));
   if (NAME) u.searchParams.set('name', NAME);
   if (AUTO_NAME) u.searchParams.set('auto', '1');
+
+  const ip = await getPublicIPv4();
+  console.log('[auto-domain] Detected IPv4:', ip || 'none');
+  if (ip) u.searchParams.set('client_ip', ip);
+
   return u.toString();
 }
 
 // ── Connect ───────────────────────────────────────────────────────────────────
 
-function connect() {
+async function connect() {
   // 自毁检查：超过 24h 没有成功连接则退出
   if (failingSince && Date.now() - failingSince > SELF_DESTRUCT_MS) {
     console.error('[auto-domain] 24h without successful connection. Self-destructing.');
@@ -160,7 +180,8 @@ function connect() {
   if (!failingSince) failingSince = Date.now();
 
   console.log('[auto-domain] Connecting...');
-  const ws = new WebSocket(buildWsUrl());
+  const wsUrl = await buildWsUrl();
+  const ws = new WebSocket(wsUrl);
 
   ws.on('open', () => {
     reconnectDelay = 3000;
