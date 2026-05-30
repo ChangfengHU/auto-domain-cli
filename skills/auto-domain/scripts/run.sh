@@ -141,15 +141,33 @@ if [[ "$DAEMON" == "1" ]]; then
   fi
 
   > "$LOG_FILE"
-  nohup node "$AGENT_JS" $ARGS >> "$LOG_FILE" 2>&1 &
+  setsid node "$AGENT_JS" $ARGS >> "$LOG_FILE" 2>&1 < /dev/null &
   echo $! > "$PID_FILE"
 
   echo "Agent started in background (PID: $(cat "$PID_FILE"))..."
   echo "Waiting for tunnel to come online..."
 
   for i in $(seq 1 40); do
+    if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      echo ""
+      echo "Error: auto-domain agent exited before tunnel came online."
+      echo "Log: $LOG_FILE"
+      tail -n 80 "$LOG_FILE" 2>/dev/null || true
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+
     # 成功：打印 URL
     if grep -q "Public URL" "$LOG_FILE" 2>/dev/null; then
+      sleep 1
+      if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo ""
+        echo "Error: auto-domain agent exited after reporting a public URL."
+        echo "Log: $LOG_FILE"
+        tail -n 80 "$LOG_FILE" 2>/dev/null || true
+        rm -f "$PID_FILE"
+        exit 1
+      fi
       URL=$(grep "Public URL" "$LOG_FILE" | tail -1 | sed 's/.*Public URL[[:space:]]*:[[:space:]]*//')
       echo ""
       echo "Tunnel is live!"
