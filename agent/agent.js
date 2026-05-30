@@ -93,8 +93,9 @@ function startPing(ws) {
   stopPing();
   pingTimer = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
-      console.log('[auto-domain] Sending heartbeat ping...');
-      ws.send(JSON.stringify({ type: 'ping', local_ok: localOk !== false }));
+      const currentOk = (localOk === true);
+      console.log(`[auto-domain] Sending heartbeat ping (local_ok: ${currentOk})`);
+      ws.send(JSON.stringify({ type: 'ping', local_ok: currentOk }));
     }
   }, PING_INTERVAL_MS);
 }
