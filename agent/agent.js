@@ -30,7 +30,7 @@ const TG_TOKEN  = args['tg-token'] || process.env.TG_BOT_TOKEN  || '';
 const TG_CHAT   = args['tg-chat']  || process.env.TG_CHAT_ID    || '';
 const LOCAL_HOST = process.env.AUTO_DOMAIN_LOCAL_HOST || '127.0.0.1';
 
-const PING_INTERVAL_MS       = 300_000;              // 5 分钟心跳
+const PING_INTERVAL_MS       = 30_000;               // 30s 心跳
 const LOCAL_CHECK_INTERVAL_MS = 30_000;              // 30s 本地健康检查
 const SELF_DESTRUCT_MS        = 24 * 60 * 60 * 1000; // 24h 无连接自毁
 
