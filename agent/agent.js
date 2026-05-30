@@ -163,6 +163,7 @@ async function buildWsUrl() {
   u.searchParams.set('port', String(PORT));
   if (NAME) u.searchParams.set('name', NAME);
   if (AUTO_NAME) u.searchParams.set('auto', '1');
+  if (METADATA) u.searchParams.set('metadata', METADATA);
 
   const ip = await getPublicIPv4();
   console.log('[auto-domain] Detected IPv4:', ip || 'none');
@@ -404,4 +405,4 @@ sendTg(tgMsg('▶️', 'Agent Starting', {
   Port: String(PORT),
   Server: SERVER,
 })).then(() => connect());
-nect());
+
