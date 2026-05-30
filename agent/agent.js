@@ -97,9 +97,13 @@ async function checkLocalService() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
-    await fetch(`http://${LOCAL_HOST}:${PORT}/`, { signal: ctrl.signal });
+    // 优先尝试 /health, 其次尝试 /
+    let resp = await fetch(`http://${LOCAL_HOST}:${PORT}/health`, { signal: ctrl.signal }).catch(() => null);
+    if (!resp || !resp.ok) {
+      resp = await fetch(`http://${LOCAL_HOST}:${PORT}/`, { signal: ctrl.signal }).catch(() => null);
+    }
     clearTimeout(t);
-    return true;
+    return !!(resp && (resp.ok || resp.status === 401 || resp.status === 403));
   } catch {
     return false;
   }
