@@ -239,12 +239,39 @@ async function connect() {
       return;
     }
 
-    if (msg.type === 'kill') {
-      console.log('[auto-domain] 💀 Kill command received. Exiting gracefully.');
-      await sendTg(tgMsg('💀', 'Agent Killed by Server', {
+    if (msg.type === 'kill' || msg.type === 'destroy') {
+      const isDestroy = msg.type === 'destroy';
+      console.log(`[auto-domain] 💀 ${isDestroy ? 'Destroy' : 'Kill'} command received. Cleaning up...`);
+      
+      if (isDestroy) {
+        // 1. Kill local service on PORT
+        console.log(`[auto-domain] 🗑  Killing local service on port ${PORT}...`);
+        try {
+          // Linux: fuser -k -n tcp PORT
+          const { execSync } = require('child_process');
+          execSync(`fuser -k ${PORT}/tcp 2>/dev/null || true`);
+        } catch (_) {}
+
+        // 2. Disable systemd service if running under one
+        if (process.env.INVOCATION_ID) {
+          console.log('[auto-domain] 🗑  Disabling systemd service...');
+          try {
+            const { execSync } = require('child_process');
+            // We assume the service name is auto-domain-<subdomain> or similar, 
+            // but the safest way is to use the unit name if we can find it.
+            // For now, we'll try to guess or use a generic approach.
+            // If we're in a systemd service, we can try to find our own unit name.
+            const unit = execSync('systemctl status $$ | grep ".service" | awk "{print $1}" | head -1').toString().trim();
+            if (unit) execSync(`systemctl disable --now ${unit} 2>/dev/null || true`);
+          } catch (_) {}
+        }
+      }
+
+      await sendTg(tgMsg('💀', `Agent ${isDestroy ? 'Destroyed' : 'Killed'} by Server`, {
         Subdomain: currentSubdomain(),
+        Action: isDestroy ? 'Local service killed & Persistence removed' : 'Agent exited',
       }));
-      ws.close(1000, 'Server kill command');
+      ws.close(1000, `Server ${msg.type} command`);
       process.exit(0);
     }
 
