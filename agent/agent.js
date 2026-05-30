@@ -10,14 +10,17 @@ const WebSocket = require('ws');
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
-const args = Object.fromEntries(
-  process.argv.slice(2)
-    .filter(a => a.startsWith('--'))
-    .map(a => {
-      const [k, ...v] = a.slice(2).split('=');
-      return [k, v.length ? v.join('=') : true];
-    })
-);
+const args = {};
+process.argv.slice(2).forEach(arg => {
+  if (arg.startsWith('--')) {
+    const eqIndex = arg.indexOf('=');
+    if (eqIndex > -1) {
+      args[arg.slice(2, eqIndex)] = arg.slice(eqIndex + 1);
+    } else {
+      args[arg.slice(2)] = true;
+    }
+  }
+});
 
 const PORT      = parseInt(args.port || args.p || '3000', 10);
 const TOKEN     = args.token  || args.t || '';
@@ -57,21 +60,22 @@ function tgMsg(emoji, title, fields) {
   return lines.join('\n');
 }
 
-// ── State ─────────────────────────────────────────────────────────────────────
-
-let reconnectDelay = 3000;
-let pingTimer      = null;
-let localCheckTimer = null;
-let tunnelUrl      = '';
-let subdomain      = '';
-let connectTime    = null;
-let reconnectCount = 0;
-let sleeping       = false;
-let localOk        = null;   // null=unknown, true=ok, false=down
-let failingSince   = null;   // timestamp: when did continuous failure start
-let replacing      = false;  // true while --replace eviction is in progress
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+let cachedIPv4 = '';
+async function getPublicIPv4() {
+  if (cachedIPv4) return cachedIPv4;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2000);
+    const resp = await fetch('https://ipv4.icanhazip.com', { signal: ctrl.signal });
+    clearTimeout(t);
+    cachedIPv4 = (await resp.text()).trim();
+    return cachedIPv4;
+  } catch {
+    return '';
+  }
+}
 
 function currentSubdomain() {
   return NAME || (tunnelUrl ? tunnelUrl.split('//')[1].split('.')[0] : '?');
@@ -89,6 +93,7 @@ function startPing(ws) {
   stopPing();
   pingTimer = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
+      console.log('[auto-domain] Sending heartbeat ping...');
       ws.send(JSON.stringify({ type: 'ping', local_ok: localOk !== false }));
     }
   }, PING_INTERVAL_MS);
@@ -98,7 +103,6 @@ async function checkLocalService() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
-    // 优先尝试 /health, 其次尝试 /
     let resp = await fetch(`http://${LOCAL_HOST}:${PORT}/health`, { signal: ctrl.signal }).catch(() => null);
     if (!resp || !resp.ok) {
       resp = await fetch(`http://${LOCAL_HOST}:${PORT}/`, { signal: ctrl.signal }).catch(() => null);
@@ -129,31 +133,16 @@ async function doLocalCheck(ws) {
     }
   }
 
-  // 只要 ws 连着，且是首次检查或者状态有变，就同步给服务端
   if (ws && ws.readyState === WebSocket.OPEN && (prev === null || ok !== prev)) {
+    console.log('[auto-domain] Reporting local status:', ok ? 'OK' : 'DOWN');
     ws.send(JSON.stringify({ type: 'ping', local_ok: ok }));
   }
 }
 
 function startLocalCheck(ws) {
   stopLocalCheck();
-  doLocalCheck(ws); // 立即跑一次
+  doLocalCheck(ws);
   localCheckTimer = setInterval(() => doLocalCheck(ws), LOCAL_CHECK_INTERVAL_MS);
-}
-
-let cachedIPv4 = '';
-async function getPublicIPv4() {
-  if (cachedIPv4) return cachedIPv4;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 2000);
-    const resp = await fetch('https://ipv4.icanhazip.com', { signal: ctrl.signal });
-    clearTimeout(t);
-    cachedIPv4 = (await resp.text()).trim();
-    return cachedIPv4;
-  } catch {
-    return '';
-  }
 }
 
 async function buildWsUrl() {
@@ -166,7 +155,6 @@ async function buildWsUrl() {
   if (METADATA) u.searchParams.set('metadata', METADATA);
 
   const ip = await getPublicIPv4();
-  console.log('[auto-domain] Detected IPv4:', ip || 'none');
   if (ip) u.searchParams.set('client_ip', ip);
 
   return u.toString();
@@ -174,17 +162,19 @@ async function buildWsUrl() {
 
 // ── Connect ───────────────────────────────────────────────────────────────────
 
-async function connect() {
-  // 自毁检查：超过 24h 没有成功连接则退出
-  if (failingSince && Date.now() - failingSince > SELF_DESTRUCT_MS) {
-    console.error('[auto-domain] 24h without successful connection. Self-destructing.');
-    sendTg(tgMsg('💀', 'Agent Self-Destruct', {
-      Name: NAME || '(auto)',
-      Reason: '24h no connection to server',
-    })).finally(() => process.exit(1));
-    return;
-  }
+let reconnectDelay = 3000;
+let pingTimer      = null;
+let localCheckTimer = null;
+let tunnelUrl      = '';
+let subdomain      = '';
+let failingSince   = null;
+let replacing      = false;
+let localOk        = null;   // null=unknown, true=ok, false=down
 
+async function connect() {
+  if (failingSince && Date.now() - failingSince > SELF_DESTRUCT_MS) {
+    process.exit(1);
+  }
   if (!failingSince) failingSince = Date.now();
 
   console.log('[auto-domain] Connecting...');
@@ -200,209 +190,86 @@ async function connect() {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return; }
 
-    // ── 隧道建立 ──────────────────────────────────────────────────────────────
     if (msg.type === 'connected') {
-      failingSince = null; // 成功连上，重置失败计时器
+      failingSince = null;
       tunnelUrl    = msg.url;
       subdomain    = msg.subdomain || currentSubdomain();
-      connectTime  = Date.now();
-      sleeping     = false;
-      const isReconnect = reconnectCount > 0;
-      reconnectCount++;
-
-      console.log(`\n✅ Tunnel is live!`);
-      console.log(`   Public URL : ${msg.url}`);
-      console.log(`   Forwarding : ${msg.url} → http://${LOCAL_HOST}:${PORT}\n`);
-
+      console.log(`\n✅ Tunnel is live!\n   Public URL : ${tunnelUrl}\n   Forwarding : ${tunnelUrl} → http://${LOCAL_HOST}:${PORT}\n`);
       startPing(ws);
       startLocalCheck(ws);
-
-      await sendTg(tgMsg(
-        isReconnect ? '🔄' : '🟢',
-        isReconnect ? 'Tunnel Reconnected' : 'Tunnel Online',
-        {
-          Subdomain: subdomain,
-          URL: msg.url,
-          Forwarding: `→ http://${LOCAL_HOST}:${PORT}`,
-          ...(isReconnect ? { 'Reconnect #': String(reconnectCount - 1) } : {}),
-        }
-      ));
-      return;
-    }
-
-    if (msg.type === 'pong') return;
-
-    // ── 服务端命令 ─────────────────────────────────────────────────────────────
-    if (msg.type === 'sleep') {
-      sleeping = true;
-      console.log('[auto-domain] 💤 Sleep command received — pausing request forwarding.');
-      ws.send(JSON.stringify({ type: 'sleep_ack' }));
-      return;
-    }
-
-    if (msg.type === 'wake') {
-      sleeping = false;
-      console.log('[auto-domain] ☀️  Wake command received — resuming request forwarding.');
-      ws.send(JSON.stringify({ type: 'wake_ack' }));
-      return;
     }
 
     if (msg.type === 'kill' || msg.type === 'destroy') {
       const isDestroy = msg.type === 'destroy';
-      console.log(`[auto-domain] 💀 ${isDestroy ? 'Destroy' : 'Kill'} command received. Cleaning up...`);
-      
       if (isDestroy) {
-        // 1. Kill local service on PORT
-        console.log(`[auto-domain] 🗑  Killing local service on port ${PORT}...`);
         try {
-          // Linux: fuser -k -n tcp PORT
           const { execSync } = require('child_process');
           execSync(`fuser -k ${PORT}/tcp 2>/dev/null || true`);
+          const unit = execSync('systemctl status $$ | grep ".service" | awk "{print $1}" | head -1').toString().trim();
+          if (unit) execSync(`systemctl disable --now ${unit} 2>/dev/null || true`);
         } catch (_) {}
-
-        // 2. Disable systemd service if running under one
-        if (process.env.INVOCATION_ID) {
-          console.log('[auto-domain] 🗑  Disabling systemd service...');
-          try {
-            const { execSync } = require('child_process');
-            // We assume the service name is auto-domain-<subdomain> or similar, 
-            // but the safest way is to use the unit name if we can find it.
-            // For now, we'll try to guess or use a generic approach.
-            // If we're in a systemd service, we can try to find our own unit name.
-            const unit = execSync('systemctl status $$ | grep ".service" | awk "{print $1}" | head -1').toString().trim();
-            if (unit) execSync(`systemctl disable --now ${unit} 2>/dev/null || true`);
-          } catch (_) {}
-        }
       }
-
-      await sendTg(tgMsg('💀', `Agent ${isDestroy ? 'Destroyed' : 'Killed'} by Server`, {
-        Subdomain: currentSubdomain(),
-        Action: isDestroy ? 'Local service killed & Persistence removed' : 'Agent exited',
-      }));
-      ws.close(1000, `Server ${msg.type} command`);
       process.exit(0);
     }
 
-    // ── 代理请求 ───────────────────────────────────────────────────────────────
     if (msg.type === 'request') {
-      if (sleeping) {
+      const { id, method, path, headers, body } = msg;
+      try {
+        const fetchHeaders = new Headers();
+        for (const [k, v] of Object.entries(headers)) {
+          if (!['host', 'connection', 'upgrade'].includes(k.toLowerCase())) fetchHeaders.set(k, v);
+        }
+        const resp = await fetch(`http://${LOCAL_HOST}:${PORT}${path}`, {
+          method,
+          headers: fetchHeaders,
+          body: (method !== 'GET' && method !== 'HEAD') ? Buffer.from(body, 'base64') : undefined,
+          redirect: 'manual'
+        });
+        const respBody = await resp.arrayBuffer();
+        const respHeaders = {};
+        resp.headers.forEach((v, k) => { respHeaders[k] = v; });
         ws.send(JSON.stringify({
-          type: 'response', id: msg.id, status: 503,
-          headers: { 'content-type': 'application/json' },
-          body: Buffer.from(JSON.stringify({ error: 'Agent sleeping' })).toString('base64'),
+          type: 'response', id, status: resp.status,
+          headers: respHeaders, body: Buffer.from(respBody).toString('base64')
         }));
-        return;
+      } catch (err) {
+        ws.send(JSON.stringify({
+          type: 'response', id, status: 502,
+          headers: { 'content-type': 'text/plain' },
+          body: Buffer.from(`Local service error: ${err.message}`).toString('base64')
+        }));
       }
-      handleRequest(ws, msg);
     }
   });
 
-  ws.on('close', async (code) => {
+  ws.on('close', (code, reason) => {
     stopPing();
     stopLocalCheck();
-    localOk = null;
-
-    // 4002 = admin reset (删除按钮触发) → 退出，不重连
-    if (code === 4002) {
-      console.error('[auto-domain] Tunnel deleted by admin. Exiting.');
-      process.exit(0);
-    }
-
-    // --replace eviction is already handling the reconnect; skip duplicate
-    if (replacing) {
-      replacing = false;
+    if (code === 4001) process.exit(0);
+    if (code === 4009 && REPLACE) {
+      if (!replacing) {
+        replacing = true;
+        const evictUrl = wsUrl + '&replace=1';
+        setTimeout(async () => {
+          console.log(`[auto-domain] 409 detected — --replace mode: evicting old agent...`);
+          const ws2 = new WebSocket(evictUrl);
+          ws2.on('open', () => ws2.close(1000, 'Eviction triggered'));
+          ws2.on('close', () => { replacing = false; connect(); });
+        }, 1000);
+      }
       return;
     }
-
-    const downAt = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-    console.log(`[auto-domain] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
-
-    if (tunnelUrl) {
-      await sendTg(tgMsg('🔴', 'Tunnel Disconnected', {
-        Subdomain: currentSubdomain(),
-        'Close code': String(code),
-        'Next retry': `${reconnectDelay / 1000}s`,
-        'Disconnected at': downAt,
-      }));
-    }
-
-    if (!failingSince) failingSince = Date.now();
     setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    reconnectDelay = Math.min(reconnectDelay + 5000, 30000);
   });
 
-  ws.on('error', async (err) => {
-    console.error(`[auto-domain] Error: ${err.message}`);
-
-    if (err.message.includes('409') || err.message.toLowerCase().includes('name already in use')) {
-      if (REPLACE && NAME) {
-        replacing = true;  // prevent close handler from scheduling a second reconnect
-        console.log(`[auto-domain] 409 detected — --replace mode: evicting old agent for '${NAME}'...`);
-        try {
-          const apiBase = SERVER.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
-          await fetch(`${apiBase}/admin/tunnels/${encodeURIComponent(NAME)}`, { method: 'DELETE' });
-        } catch (_) {}
-        await new Promise(r => setTimeout(r, 2000));
-        console.log('[auto-domain] Retrying connection...');
-        connect();
-        return;
-      }
-      console.error(`\nError: subdomain '${NAME}' is already in use by another agent.`);
-      console.error('   Use a different --name, or pass --auto-name to get a random suffix.');
-      console.error('   Or pass --replace to automatically evict the existing agent.');
-      await sendTg(tgMsg('🚫', 'Name Conflict', {
-        Name: NAME,
-        Action: 'Use --replace to evict, or choose a different --name',
-      }));
-      process.exit(2);
-    }
-
-    if (err.message.includes('401') || err.message.includes('Unauthorized')) {
-      await sendTg(tgMsg('🚨', 'Agent Auth Failed', {
-        Error: err.message,
-        Action: 'Check --token value',
-      }));
-    }
+  ws.on('error', (err) => {
+    console.error(`[auto-domain] WebSocket error: ${err.message}`);
   });
 }
-
-// ── Handle proxy request ──────────────────────────────────────────────────────
-
-async function handleRequest(ws, msg) {
-  const localUrl = `http://${LOCAL_HOST}:${PORT}${msg.path}`;
-  try {
-    const hasBody = msg.body && !['GET', 'HEAD'].includes(msg.method.toUpperCase());
-    const body    = hasBody ? Buffer.from(msg.body, 'base64') : undefined;
-    const headers = { ...msg.headers };
-    delete headers['host'];
-    headers['host'] = `${LOCAL_HOST}:${PORT}`;
-
-    const resp = await fetch(localUrl, { method: msg.method, headers, body, redirect: 'manual' });
-    const respBuffer  = Buffer.from(await resp.arrayBuffer());
-    const respHeaders = {};
-    resp.headers.forEach((v, k) => { respHeaders[k] = v; });
-
-    ws.send(JSON.stringify({
-      type: 'response', id: msg.id,
-      status: resp.status,
-      headers: respHeaders,
-      body: respBuffer.toString('base64'),
-    }));
-  } catch (err) {
-    console.error(`[auto-domain] Local request failed: ${err.message}`);
-    ws.send(JSON.stringify({
-      type: 'response', id: msg.id, status: 502,
-      headers: { 'content-type': 'text/plain' },
-      body: Buffer.from(`Local service error: ${err.message}`).toString('base64'),
-    }));
-  }
-}
-
-// ── Start ─────────────────────────────────────────────────────────────────────
 
 sendTg(tgMsg('▶️', 'Agent Starting', {
   Name: NAME || '(auto)',
   Port: String(PORT),
   Server: SERVER,
 })).then(() => connect());
-
