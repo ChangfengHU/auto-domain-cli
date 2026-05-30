@@ -154,6 +154,7 @@ async function buildWsUrl() {
   if (NAME) u.searchParams.set('name', NAME);
   if (AUTO_NAME) u.searchParams.set('auto', '1');
   if (METADATA) u.searchParams.set('metadata', METADATA);
+  if (REPLACE) u.searchParams.set('replace', '1');
 
   const ip = await getPublicIPv4();
   if (ip) u.searchParams.set('client_ip', ip);
