@@ -147,8 +147,19 @@ function startLocalCheck(ws) {
 }
 
 async function buildWsUrl() {
-  const base = SERVER.replace(/^http/, 'ws');
-  const u    = new URL(base);
+  let host = SERVER.replace(/^wss?:\/\//, '');
+  // 如果指定了名字，则尝试直接连接到该子域名的 /websocket 路径
+  // 这能确保 Agent 和网关请求命中同一个 Cloudflare Durable Object 实例
+  if (NAME && !host.startsWith(NAME + '.')) {
+    // 假设域名后缀是 .chxyka.ccwu.cc 或类似的
+    const parts = host.split('.');
+    if (parts.length >= 2) {
+      const domainSuffix = parts.slice(-3).join('.'); // chxyka.ccwu.cc
+      host = `${NAME}.${domainSuffix}`;
+    }
+  }
+
+  const u = new URL(`wss://${host}/websocket`);
   if (TOKEN) u.searchParams.set('token', TOKEN);
   u.searchParams.set('port', String(PORT));
   if (NAME) u.searchParams.set('name', NAME);
