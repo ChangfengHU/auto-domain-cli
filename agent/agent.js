@@ -203,6 +203,11 @@ async function connect() {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return; }
 
+    if (msg.type === 'pong') {
+      console.log('[auto-domain] Received heartbeat pong');
+      return;
+    }
+
     if (msg.type === 'connected') {
       failingSince = null;
       tunnelUrl    = msg.url;
