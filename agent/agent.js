@@ -111,23 +111,25 @@ async function checkLocalService() {
 
 async function doLocalCheck(ws) {
   const ok = await checkLocalService();
-  if (ok === localOk) return; // 无变化，不处理
   const prev = localOk;
   localOk = ok;
-  if (prev === null) return; // 首次检查，不发通知
-  if (ok) {
-    console.log('[auto-domain] ✅ Local service recovered on port', PORT);
-    sendTg(tgMsg('🟢', 'Local Service Recovered', {
-      Port: String(PORT), Subdomain: currentSubdomain(),
-    })).catch(() => {});
-  } else {
-    console.log('[auto-domain] ❌ Local service DOWN on port', PORT);
-    sendTg(tgMsg('🔴', 'Local Service Down', {
-      Port: String(PORT), Subdomain: currentSubdomain(),
-    })).catch(() => {});
+
+  if (prev !== null && ok !== prev) {
+    if (ok) {
+      console.log('[auto-domain] ✅ Local service recovered on port', PORT);
+      sendTg(tgMsg('🟢', 'Local Service Recovered', {
+        Port: String(PORT), Subdomain: currentSubdomain(),
+      })).catch(() => {});
+    } else {
+      console.log('[auto-domain] ❌ Local service DOWN on port', PORT);
+      sendTg(tgMsg('🔴', 'Local Service Down', {
+        Port: String(PORT), Subdomain: currentSubdomain(),
+      })).catch(() => {});
+    }
   }
-  // 通知服务端（如果 ws 还连着）
-  if (ws && ws.readyState === WebSocket.OPEN) {
+
+  // 只要 ws 连着，且是首次检查或者状态有变，就同步给服务端
+  if (ws && ws.readyState === WebSocket.OPEN && (prev === null || ok !== prev)) {
     ws.send(JSON.stringify({ type: 'ping', local_ok: ok }));
   }
 }
