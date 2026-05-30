@@ -22,6 +22,7 @@ const args = Object.fromEntries(
 const PORT      = parseInt(args.port || args.p || '3000', 10);
 const TOKEN     = args.token  || args.t || '';
 const NAME      = args.name   || args.n || '';
+const METADATA  = args.metadata || args.m || '';
 const AUTO_NAME = args['auto-name'] === true || args['auto-name'] === '1' || args.auto === true || args.auto === '1';
 const REPLACE   = args['replace'] === true || args['replace'] === '1';
 const SERVER    = (args.server || 'wss://tunnel-api.chxyka.ccwu.cc').replace(/\/$/, '');
@@ -403,3 +404,4 @@ sendTg(tgMsg('▶️', 'Agent Starting', {
   Port: String(PORT),
   Server: SERVER,
 })).then(() => connect());
+nect());
