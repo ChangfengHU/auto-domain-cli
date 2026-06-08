@@ -29,6 +29,7 @@ mkdir -p "$CACHE_DIR"
 PORT=""
 NAME=""
 TOKEN=""
+METADATA=""
 RESET=0
 DAEMON=0
 STOP=0
@@ -40,14 +41,17 @@ for arg in "$@"; do
     --port=*) PORT="${arg#--port=}" ;;
     --name=*) NAME="${arg#--name=}" ;;
     --token=*) TOKEN="${arg#--token=}" ;;
+    --metadata=*) METADATA="${arg#--metadata=}" ;;
+    -m=*) METADATA="${arg#-m=}" ;;
     --reset) RESET=1 ;;
     --daemon|-d) DAEMON=1 ;;
     --stop) STOP=1 ;;
     --replace) REPLACE=1 ;;
     --auto-name) AUTO_NAME=1 ;;
     -h|--help)
-      echo "Usage: $0 --port=3000 [--name=myapp] [--token=xxx] [--daemon] [--stop] [--reset] [--replace] [--auto-name]"
+      echo "Usage: $0 --port=3000 [--name=myapp] [--token=xxx] [--metadata=json] [--daemon] [--stop] [--reset] [--replace] [--auto-name]"
       echo "  --token       optional; kept for compatibility when a server token is issued"
+      echo "  --metadata    optional JSON metadata stored in tunnel-admin"
       echo "  --replace     replace existing tunnel for the same name (server-side)"
       echo "  --auto-name   server appends a random 4-digit suffix to --name (guarantees uniqueness)"
       exit 0
@@ -113,12 +117,13 @@ if [[ ! -d "$AGENT_DIR/node_modules/ws" ]]; then
   (cd "$AGENT_DIR" && npm install --silent --prefer-offline)
 fi
 
-ARGS="--port=$PORT"
-[[ -n "$TOKEN" ]] && ARGS="$ARGS --token=$TOKEN"
-[[ -n "$NAME" ]] && ARGS="$ARGS --name=$NAME"
-[[ "$REPLACE" == "1" ]] && ARGS="$ARGS --replace"
-[[ "$AUTO_NAME" == "1" ]] && ARGS="$ARGS --auto-name"
-[[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS="$ARGS --server=$AUTO_DOMAIN_SERVER"
+ARGS=("--port=$PORT")
+[[ -n "$TOKEN" ]] && ARGS+=("--token=$TOKEN")
+[[ -n "$NAME" ]] && ARGS+=("--name=$NAME")
+[[ -n "$METADATA" ]] && ARGS+=("--metadata=$METADATA")
+[[ "$REPLACE" == "1" ]] && ARGS+=("--replace")
+[[ "$AUTO_NAME" == "1" ]] && ARGS+=("--auto-name")
+[[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS+=("--server=$AUTO_DOMAIN_SERVER")
 
 if [[ "$DAEMON" == "1" ]]; then
   # ── 幂等检查：同名 tunnel 已在运行，直接返回 URL ──────────────────────────
@@ -141,7 +146,7 @@ if [[ "$DAEMON" == "1" ]]; then
   fi
 
   > "$LOG_FILE"
-  setsid node "$AGENT_JS" $ARGS >> "$LOG_FILE" 2>&1 < /dev/null &
+  setsid node "$AGENT_JS" "${ARGS[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
   echo $! > "$PID_FILE"
 
   echo "Agent started in background (PID: $(cat "$PID_FILE"))..."
@@ -201,5 +206,5 @@ if [[ "$DAEMON" == "1" ]]; then
   exit 1
 else
   echo "Connecting auto-domain..."
-  exec node "$AGENT_JS" $ARGS
+  exec node "$AGENT_JS" "${ARGS[@]}"
 fi
