@@ -135,7 +135,6 @@ CLI_COMMAND=bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --port=300
 README.md
 scripts/
   auto-domain.sh
-  install-auto-domain.sh
   publish-auto-domain.sh
   publish-skill.sh
   upload-file.sh
@@ -145,19 +144,15 @@ skills/
     scripts/run.sh
     agent/agent.js
     agent/package.json
-agent/
-  agent.js
-  package.json
 ```
 
 说明：
 
 - `scripts/auto-domain.sh` 是直接给人执行的 CLI 入口
-- `scripts/install-auto-domain.sh` 是固定的 skill 安装入口
 - `scripts/publish-auto-domain.sh` 是基于 GitHub 远程代码发布 skill 的一行命令入口
 - `scripts/publish-skill.sh` 是维护者发布 skill 用的脚本
 - `skills/auto-domain/` 是真正会被安装下去的 skill 内容，也是 CLI 核心逻辑来源
-- `agent/` 是 CLI 模式使用的 agent 源码
+- `skills/auto-domain/agent/` 是唯一保留的 agent 源码位置
 
 ## 7. 可选 token
 

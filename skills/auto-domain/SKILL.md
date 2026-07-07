@@ -12,7 +12,7 @@ Use this skill when the user wants to expose a local port to the public internet
 The fixed install command is:
 
 ```bash
-bash <(curl -fsSL https://skill.vyibc.com/install-auto-domain.sh)
+bash <(curl -fsSL 'https://skill.vyibc.com/install-auto-domain.sh?ts=...')
 ```
 
 ## Installed Location
@@ -43,6 +43,18 @@ If the user works in another client, replace the root path accordingly.
 - If `--name=myapp` is already taken, the service automatically falls back to `myapp-xxxx`.
 - If the user has an issued token, append `--token=atd-...`.
 - Node.js 18 or newer is required on the local machine.
+
+## Source of Truth
+
+The single runtime source of truth is:
+
+```text
+skills/auto-domain/scripts/run.sh
+```
+
+After installation, the local skill runs this script directly. The public CLI
+entry `https://skill.vyibc.com/auto-domain.sh` is also published from this same
+script.
 
 ## Examples
 

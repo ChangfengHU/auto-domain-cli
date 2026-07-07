@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CACHE_DIR="$HOME/.auto-domain"
 CONFIG_FILE="$CACHE_DIR/config"
+PID_FILE="$CACHE_DIR/agent.pid"
+LOG_FILE="$CACHE_DIR/agent.log"
 AUTO_DOMAIN_SERVER="${AUTO_DOMAIN_SERVER:-wss://tunnel-api.chxyka.ccwu.cc}"
 AGENT_URL="${AGENT_URL:-https://skill.vyibc.com/agent.js}"
 
@@ -28,6 +30,8 @@ PORT=""
 NAME=""
 TOKEN=""
 RESET=0
+DAEMON=0
+STOP=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -35,8 +39,10 @@ for arg in "$@"; do
     --name=*) NAME="${arg#--name=}" ;;
     --token=*) TOKEN="${arg#--token=}" ;;
     --reset) RESET=1 ;;
+    --daemon) DAEMON=1 ;;
+    --stop) STOP=1 ;;
     -h|--help)
-      echo "Usage: $0 --port=3000 [--name=myapp] [--token=atd-xxxx] [--reset]"
+      echo "Usage: $0 --port=3000 [--name=myapp] [--token=atd-xxxx] [--daemon] [--stop] [--reset]"
       exit 0
       ;;
   esac
@@ -45,6 +51,39 @@ done
 if [[ "$RESET" == "1" ]]; then
   rm -rf "$CACHE_DIR"
   mkdir -p "$CACHE_DIR"
+fi
+
+if [[ "$STOP" == "1" ]]; then
+  if [[ ! -f "$PID_FILE" ]]; then
+    echo "No background agent is running."
+    exit 0
+  fi
+
+  PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [[ -z "$PID" ]]; then
+    rm -f "$PID_FILE"
+    echo "No background agent is running."
+    exit 0
+  fi
+
+  if kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      if ! kill -0 "$PID" 2>/dev/null; then
+        break
+      fi
+      sleep 0.2
+    done
+    if kill -0 "$PID" 2>/dev/null; then
+      kill -9 "$PID" 2>/dev/null || true
+    fi
+    echo "Stopped background agent (PID: $PID)."
+  else
+    echo "Background agent was not running."
+  fi
+
+  rm -f "$PID_FILE"
+  exit 0
 fi
 
 [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE" 2>/dev/null || true
@@ -94,6 +133,59 @@ ARGS="--port=$PORT"
 [[ -n "$TOKEN" ]] && ARGS="$ARGS --token=$TOKEN"
 [[ -n "$NAME" ]] && ARGS="$ARGS --name=$NAME"
 [[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS="$ARGS --server=$AUTO_DOMAIN_SERVER"
+
+if [[ "$DAEMON" == "1" ]]; then
+  if [[ -f "$PID_FILE" ]]; then
+    OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
+      echo "Agent is already running in background (PID: $OLD_PID)."
+      echo "Logs: tail -f $LOG_FILE"
+      exit 0
+    fi
+    rm -f "$PID_FILE"
+  fi
+
+  : > "$LOG_FILE"
+  nohup node "$AGENT_JS" $ARGS >>"$LOG_FILE" 2>&1 &
+  PID=$!
+  echo "$PID" > "$PID_FILE"
+
+  echo "Agent started in background (PID: $PID)..."
+  echo "Waiting for tunnel to come online..."
+  echo ""
+
+  READY=0
+  for _ in $(seq 1 60); do
+    if ! kill -0 "$PID" 2>/dev/null; then
+      echo "Background agent exited unexpectedly."
+      echo "Logs: tail -n 50 $LOG_FILE"
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+
+    if grep -q "Tunnel is live" "$LOG_FILE" 2>/dev/null; then
+      READY=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "$READY" != "1" ]]; then
+    echo "Timed out waiting for tunnel."
+    echo "Logs: tail -f $LOG_FILE"
+    exit 1
+  fi
+
+  PUBLIC_URL="$(grep "Public URL :" "$LOG_FILE" | tail -1 | sed 's/.*Public URL : //')"
+  FORWARDING="$(grep "Forwarding :" "$LOG_FILE" | tail -1 | sed 's/.*Forwarding : //')"
+
+  echo "Tunnel is live!"
+  [[ -n "$PUBLIC_URL" ]] && echo "   Public URL : $PUBLIC_URL"
+  [[ -n "$FORWARDING" ]] && echo "   Forwarding : $FORWARDING"
+  echo "   Logs       : tail -f $LOG_FILE"
+  echo "   Stop       : bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --stop"
+  exit 0
+fi
 
 echo "Connecting auto-domain..."
 
