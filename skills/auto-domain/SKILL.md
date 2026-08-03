@@ -1,6 +1,6 @@
 ---
 name: auto-domain
-description: "当用户说"给我的服务分配公网域名"、"内网穿透"、"暴露本地服务"、"expose localhost"、 "给端口分配域名"、"公网访问本地"、"auto-domain"、"隧道"、"tunnel 端口"、 "把本地服务暴露出去"、"我需要一个公网地址" 时自动触发。 一键为本地任意端口的服务分配 *.chxyka.ccwu.cc 公网域名，零配置，无需服务器。"
+description: 为本地任意端口分配 *.chxyka.ccwu.cc 公网域名并守护长连接。用户要求内网穿透、暴露 localhost、给端口分配域名、建立 auto-domain 隧道或恢复失效隧道时使用。
 ---
 
 # Auto Domain
@@ -42,6 +42,9 @@ To stop the background agent:
 - If `--name` is already taken: reports error immediately (does not time out).
 - If token is invalid: reports error immediately.
 - Re-running the same command while tunnel is alive prints the existing URL without restarting.
+- Sends an application heartbeat every 30 seconds. If no `pong` arrives within
+  15 seconds, terminates the stale WebSocket so the reconnect loop restores the
+  tunnel without waiting for the operating system's TCP timeout.
 
 ## Examples
 
