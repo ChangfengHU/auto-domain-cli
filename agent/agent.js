@@ -29,8 +29,10 @@ const SERVER    = (args.server || 'wss://tunnel-api.chxyka.ccwu.cc').replace(/\/
 const TG_TOKEN  = args['tg-token'] || process.env.TG_BOT_TOKEN  || '';
 const TG_CHAT   = args['tg-chat']  || process.env.TG_CHAT_ID    || '';
 const LOCAL_HOST = process.env.AUTO_DOMAIN_LOCAL_HOST || '127.0.0.1';
+const LOCAL_HEALTH_PATH = (process.env.AUTO_DOMAIN_LOCAL_HEALTH_PATH || '/').trim() || '/';
 
-const PING_INTERVAL_MS       = 300_000;              // 5 分钟心跳
+const PING_INTERVAL_MS       = 30_000;               // 30s 应用层心跳
+const PONG_TIMEOUT_MS        = 15_000;               // 15s 未收到 pong，主动断开重连
 const LOCAL_CHECK_INTERVAL_MS = 30_000;              // 30s 本地健康检查
 const SELF_DESTRUCT_MS        = 24 * 60 * 60 * 1000; // 24h 无连接自毁
 
@@ -60,7 +62,6 @@ function tgMsg(emoji, title, fields) {
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let reconnectDelay = 3000;
-let pingTimer      = null;
 let localCheckTimer = null;
 let tunnelUrl      = '';
 let subdomain      = '';
@@ -92,28 +93,93 @@ function currentSubdomain() {
   return NAME || (tunnelUrl ? tunnelUrl.split('//')[1].split('.')[0] : '?');
 }
 
-function stopPing() {
-  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-}
-
 function stopLocalCheck() {
   if (localCheckTimer) { clearInterval(localCheckTimer); localCheckTimer = null; }
 }
 
-function startPing(ws) {
-  stopPing();
-  pingTimer = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'ping', local_ok: localOk !== false }));
+function createHeartbeatController({
+  pingIntervalMs = PING_INTERVAL_MS,
+  pongTimeoutMs = PONG_TIMEOUT_MS,
+  getLocalOk = () => localOk,
+  logger = console,
+  WebSocketImpl = WebSocket,
+} = {}) {
+  let pingTimer = null;
+  let pongTimer = null;
+  let activeSocket = null;
+  let queuedSend = false;
+
+  function clearPongDeadline() {
+    if (pongTimer) {
+      clearTimeout(pongTimer);
+      pongTimer = null;
     }
-  }, PING_INTERVAL_MS);
+  }
+
+  function stop() {
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
+    clearPongDeadline();
+    activeSocket = null;
+    queuedSend = false;
+  }
+
+  function terminateStaleSocket(ws, reason) {
+    clearPongDeadline();
+    logger.error(`[auto-domain] ${reason}; terminating stale WebSocket.`);
+    try { ws.terminate(); } catch (_) {}
+  }
+
+  function send(ws) {
+    if (!ws || ws.readyState !== WebSocketImpl.OPEN) return;
+    activeSocket = ws;
+    if (pongTimer) {
+      queuedSend = true;
+      return;
+    }
+
+    pongTimer = setTimeout(() => {
+      pongTimer = null;
+      if (ws.readyState === WebSocketImpl.OPEN) {
+        terminateStaleSocket(ws, `Pong timeout after ${pongTimeoutMs}ms`);
+      }
+    }, pongTimeoutMs);
+
+    try {
+      ws.send(JSON.stringify({ type: 'ping', local_ok: getLocalOk() !== false }));
+    } catch (error) {
+      terminateStaleSocket(ws, `Heartbeat send failed: ${error.message}`);
+    }
+  }
+
+  function start(ws) {
+    stop();
+    activeSocket = ws;
+    send(ws);
+    pingTimer = setInterval(() => send(ws), pingIntervalMs);
+  }
+
+  function acknowledge() {
+    clearPongDeadline();
+    if (queuedSend && activeSocket) {
+      queuedSend = false;
+      send(activeSocket);
+    }
+  }
+
+  return { start, stop, send, acknowledge };
 }
+
+const heartbeat = createHeartbeatController();
 
 async function checkLocalService() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
-    await fetch(`http://${LOCAL_HOST}:${PORT}/`, { signal: ctrl.signal });
+    const healthPath = LOCAL_HEALTH_PATH.startsWith('/') ? LOCAL_HEALTH_PATH : `/${LOCAL_HEALTH_PATH}`;
+    await fetch(`http://${LOCAL_HOST}:${PORT}${healthPath}`, { signal: ctrl.signal });
     clearTimeout(t);
     return true;
   } catch {
@@ -126,9 +192,10 @@ async function doLocalCheck(ws) {
   if (ok === localOk) return; // 无变化，不处理
   const prev = localOk;
   localOk = ok;
-  // 首次检查也要同步给服务端，否则 tunnel-admin 会长期停留在 unknown。
+  // 首次结果也要同步给服务端；若初始 heartbeat 仍在等待 pong，
+  // controller 会在该 pong 到达后立即补发最新 local_ok。
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'ping', local_ok: ok }));
+    heartbeat.send(ws);
   }
   if (prev === null) return; // 首次检查不发通知
   if (ok) {
@@ -205,7 +272,7 @@ async function connect() {
       console.log(`   Public URL : ${msg.url}`);
       console.log(`   Forwarding : ${msg.url} → http://${LOCAL_HOST}:${PORT}\n`);
 
-      startPing(ws);
+      heartbeat.start(ws);
       startLocalCheck(ws);
 
       await sendTg(tgMsg(
@@ -221,7 +288,10 @@ async function connect() {
       return;
     }
 
-    if (msg.type === 'pong') return;
+    if (msg.type === 'pong') {
+      heartbeat.acknowledge();
+      return;
+    }
 
     // ── 服务端命令 ─────────────────────────────────────────────────────────────
     if (msg.type === 'sleep') {
@@ -262,7 +332,7 @@ async function connect() {
   });
 
   ws.on('close', async (code) => {
-    stopPing();
+    heartbeat.stop();
     stopLocalCheck();
     localOk = null;
 
@@ -371,8 +441,16 @@ async function handleRequest(ws, msg) {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
-sendTg(tgMsg('▶️', 'Agent Starting', {
-  Name: NAME || '(auto)',
-  Port: String(PORT),
-  Server: SERVER,
-})).then(() => connect());
+function startAgent() {
+  return sendTg(tgMsg('▶️', 'Agent Starting', {
+    Name: NAME || '(auto)',
+    Port: String(PORT),
+    Server: SERVER,
+  })).then(() => connect());
+}
+
+if (require.main === module) {
+  startAgent();
+}
+
+module.exports = { createHeartbeatController, startAgent };
