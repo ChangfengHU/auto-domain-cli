@@ -9,6 +9,7 @@ CACHE_DIR="$HOME/.auto-domain"
 CONFIG_FILE="$CACHE_DIR/config"
 LOG_FILE="$CACHE_DIR/agent.log"
 PID_FILE="$CACHE_DIR/agent.pid"
+SUPERVISOR_PID_FILE="$CACHE_DIR/agent.supervisor.pid"
 AUTO_DOMAIN_SERVER="${AUTO_DOMAIN_SERVER:-wss://tunnel-api.chxyka.ccwu.cc}"
 AGENT_URL="${AGENT_URL:-https://skill.vyibc.com/agent.js}"
 
@@ -60,9 +61,18 @@ for arg in "$@"; do
 done
 
 if [[ "$STOP" == "1" ]]; then
+  stopped=0
+  if [[ -f "$SUPERVISOR_PID_FILE" ]] && kill -0 "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null; then
+    kill "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null || true
+    rm -f "$SUPERVISOR_PID_FILE"
+    stopped=1
+  fi
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-    kill "$(cat "$PID_FILE")"
+    kill "$(cat "$PID_FILE")" 2>/dev/null || true
     rm -f "$PID_FILE"
+    stopped=1
+  fi
+  if [[ "$stopped" == "1" ]]; then
     echo "auto-domain agent stopped."
   else
     echo "No running agent found."
@@ -108,7 +118,7 @@ fi
 
 if [[ ! -f "$AGENT_PKG" ]]; then
   cat > "$AGENT_PKG" <<'EOF'
-{"name":"auto-domain-agent","private":true,"dependencies":{"ws":"^8.18.0"}}
+{"name":"auto-domain-agent","private":true,"dependencies":{"ws":"^8.21.0"}}
 EOF
 fi
 
@@ -126,8 +136,42 @@ ARGS=("--port=$PORT")
 [[ -n "${AUTO_DOMAIN_SERVER:-}" ]] && ARGS+=("--server=$AUTO_DOMAIN_SERVER")
 
 if [[ "$DAEMON" == "1" ]]; then
+  start_supervisor() {
+    local args_cmd="$1"
+    nohup bash -lc "
+      trap '' HUP
+      cleanup() {
+        if [[ -f '$PID_FILE' ]]; then
+          child_pid=\$(cat '$PID_FILE' 2>/dev/null || true)
+          if [[ -n \"\${child_pid:-}\" ]]; then
+            kill \"\$child_pid\" 2>/dev/null || true
+          fi
+          rm -f '$PID_FILE'
+        fi
+      }
+      trap 'cleanup; exit 0' TERM INT
+      trap cleanup EXIT
+      restart_delay=3
+      while true; do
+        echo \"[auto-domain] Supervised agent launching...\" >> '$LOG_FILE'
+        node '$AGENT_JS' $args_cmd >> '$LOG_FILE' 2>&1 < /dev/null &
+        agent_pid=\$!
+        echo \"\$agent_pid\" > '$PID_FILE'
+        wait \"\$agent_pid\"
+        exit_code=\$?
+        rm -f '$PID_FILE'
+        echo \"[auto-domain] Agent exited with code \$exit_code. Restarting in \${restart_delay}s...\" >> '$LOG_FILE'
+        sleep \"\$restart_delay\"
+        if [[ \$restart_delay -lt 30 ]]; then
+          restart_delay=\$((restart_delay * 2))
+        fi
+      done
+    " >/dev/null 2>&1 &
+    echo $! > "$SUPERVISOR_PID_FILE"
+  }
+
   # ── 幂等检查：同名 tunnel 已在运行，直接返回 URL ──────────────────────────
-  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  if [[ -f "$SUPERVISOR_PID_FILE" ]] && kill -0 "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null; then
     EXPECTED_URL="https://${NAME}.chxyka.ccwu.cc"
     if [[ -n "$NAME" ]] && grep -q "$EXPECTED_URL" "$LOG_FILE" 2>/dev/null; then
       URL=$(grep "Public URL" "$LOG_FILE" | tail -1 | sed 's/.*Public URL[[:space:]]*:[[:space:]]*//')
@@ -140,39 +184,37 @@ if [[ "$DAEMON" == "1" ]]; then
       exit 0
     fi
 
+    echo "Tunnel supervisor already running (PID: $(cat "$SUPERVISOR_PID_FILE"))."
+    echo "   Logs       : tail -f $LOG_FILE"
+    echo "   Stop       : bash <(curl -fsSL https://skill.vyibc.com/auto-domain.sh) --stop"
+    exit 0
+  fi
+
+  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     echo "Stopping existing agent (PID: $(cat "$PID_FILE"))..."
-    kill "$(cat "$PID_FILE")"
+    kill "$(cat "$PID_FILE")" 2>/dev/null || true
     sleep 1
   fi
 
   > "$LOG_FILE"
-  setsid node "$AGENT_JS" "${ARGS[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
-  echo $! > "$PID_FILE"
+  args_cmd="$(printf '%q ' "${ARGS[@]}")"
+  start_supervisor "$args_cmd"
 
-  echo "Agent started in background (PID: $(cat "$PID_FILE"))..."
+  echo "Agent supervisor started in background (PID: $(cat "$SUPERVISOR_PID_FILE"))..."
   echo "Waiting for tunnel to come online..."
 
   for i in $(seq 1 40); do
-    if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    if [[ -f "$SUPERVISOR_PID_FILE" ]] && ! kill -0 "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null; then
       echo ""
-      echo "Error: auto-domain agent exited before tunnel came online."
+      echo "Error: auto-domain supervisor exited before tunnel came online."
       echo "Log: $LOG_FILE"
       tail -n 80 "$LOG_FILE" 2>/dev/null || true
-      rm -f "$PID_FILE"
+      rm -f "$SUPERVISOR_PID_FILE" "$PID_FILE"
       exit 1
     fi
 
     # 成功：打印 URL
     if grep -q "Public URL" "$LOG_FILE" 2>/dev/null; then
-      sleep 1
-      if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-        echo ""
-        echo "Error: auto-domain agent exited after reporting a public URL."
-        echo "Log: $LOG_FILE"
-        tail -n 80 "$LOG_FILE" 2>/dev/null || true
-        rm -f "$PID_FILE"
-        exit 1
-      fi
       URL=$(grep "Public URL" "$LOG_FILE" | tail -1 | sed 's/.*Public URL[[:space:]]*:[[:space:]]*//')
       echo ""
       echo "Tunnel is live!"
@@ -187,22 +229,27 @@ if [[ "$DAEMON" == "1" ]]; then
       echo ""
       echo "Error: subdomain '$NAME' is already in use by another agent."
       echo "   Use a different --name, or pass --auto-name to get a random suffix appended."
-      kill "$(cat "$PID_FILE")" 2>/dev/null || true
-      rm -f "$PID_FILE"
+      [[ -f "$SUPERVISOR_PID_FILE" ]] && kill "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null || true
+      [[ -f "$PID_FILE" ]] && kill "$(cat "$PID_FILE")" 2>/dev/null || true
+      rm -f "$SUPERVISOR_PID_FILE" "$PID_FILE"
       exit 2
     fi
     # 失败：token 无效（401）
     if grep -q "response: 401\|Unauthorized" "$LOG_FILE" 2>/dev/null; then
       echo ""
       echo "Error: invalid token. Check your --token value."
-      kill "$(cat "$PID_FILE")" 2>/dev/null
-      rm -f "$PID_FILE"
+      [[ -f "$SUPERVISOR_PID_FILE" ]] && kill "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null || true
+      [[ -f "$PID_FILE" ]] && kill "$(cat "$PID_FILE")" 2>/dev/null || true
+      rm -f "$SUPERVISOR_PID_FILE" "$PID_FILE"
       exit 1
     fi
     sleep 0.5
   done
 
   echo "Timed out waiting for tunnel. Check: tail -f $LOG_FILE"
+  [[ -f "$SUPERVISOR_PID_FILE" ]] && kill "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null || true
+  [[ -f "$PID_FILE" ]] && kill "$(cat "$PID_FILE")" 2>/dev/null || true
+  rm -f "$SUPERVISOR_PID_FILE" "$PID_FILE"
   exit 1
 else
   echo "Connecting auto-domain..."
