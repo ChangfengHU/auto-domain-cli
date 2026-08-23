@@ -29,6 +29,14 @@ const SERVER    = (args.server || 'wss://tunnel-api.chxyka.ccwu.cc').replace(/\/
 const TG_TOKEN  = args['tg-token'] || process.env.TG_BOT_TOKEN  || '';
 const TG_CHAT   = args['tg-chat']  || process.env.TG_CHAT_ID    || '';
 const LOCAL_HOST = process.env.AUTO_DOMAIN_LOCAL_HOST || '127.0.0.1';
+// 转发给本地服务时用哪个 Host。默认(空)沿用 fetch 由 URL 推出的回环 Host,
+// 因为多数本地服务拿 Host 做 DNS-rebinding 防护、只认回环地址。
+// 但有的服务(如 dsh)规定「Origin 存在时必须等于 Host」:浏览器会带公网 Origin,
+// 而本地 Host 是回环,于是**所有浏览器请求 403**。这类服务自己用 --trusted-host
+// 声明了受信公网主机名,填进本变量即可,两道防护(rebinding / 跨站)都还在。
+// 两个坑:①上游隧道服务端会剥掉 Host 头,agent 收到的是 undefined,只能显式给;
+// ②undici 的 fetch 把 Host 当禁止头丢弃,所以设了这个变量必须绕开 fetch 走 node:http。
+const FORWARD_HOST = process.env.AUTO_DOMAIN_FORWARD_HOST || '';
 const LOCAL_HEALTH_PATH = (process.env.AUTO_DOMAIN_LOCAL_HEALTH_PATH || '/').trim() || '/';
 
 const PING_INTERVAL_MS       = 30_000;               // 30s 应用层心跳
@@ -400,6 +408,25 @@ async function connect() {
   });
 }
 
+// 只在需要自定义 Host 时使用:fetch 会丢弃 Host,node:http 不会。
+function forwardWithHost(path, method, headers, body) {
+  const http = require('http');
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: LOCAL_HOST, port: PORT, path, method, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        headers: Object.fromEntries(Object.entries(res.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v])),
+        buffer: Buffer.concat(chunks),
+      }));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 // ── Handle proxy request ──────────────────────────────────────────────────────
 
 async function handleRequest(ws, msg) {
@@ -416,16 +443,23 @@ async function handleRequest(ws, msg) {
         delete headers[key];
       }
     }
-    headers['host'] = `${LOCAL_HOST}:${PORT}`;
-
-    const resp = await fetch(localUrl, { method: msg.method, headers, body, redirect: 'manual' });
-    const respBuffer  = Buffer.from(await resp.arrayBuffer());
-    const respHeaders = {};
-    resp.headers.forEach((v, k) => { respHeaders[k] = v; });
+    let status, respBuffer, respHeaders;
+    if (FORWARD_HOST) {
+      headers['host'] = FORWARD_HOST;
+      const r = await forwardWithHost(msg.path, msg.method, headers, body);
+      status = r.status; respBuffer = r.buffer; respHeaders = r.headers;
+    } else {
+      headers['host'] = `${LOCAL_HOST}:${PORT}`;
+      const resp = await fetch(localUrl, { method: msg.method, headers, body, redirect: 'manual' });
+      status = resp.status;
+      respBuffer = Buffer.from(await resp.arrayBuffer());
+      respHeaders = {};
+      resp.headers.forEach((v, k) => { respHeaders[k] = v; });
+    }
 
     ws.send(JSON.stringify({
       type: 'response', id: msg.id,
-      status: resp.status,
+      status,
       headers: respHeaders,
       body: respBuffer.toString('base64'),
     }));
